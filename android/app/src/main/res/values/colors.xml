@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared palette for widgets/launcher. Compose uses the same values (ui/theme/Theme.kt). -->
+<resources>
+    <color name="bg">#FF0E131B</color>
+    <color name="surface">#FF172029</color>
+    <color name="surface_high">#FF1D2632</color>
+    <color name="surface_top">#FF253041</color>
+    <color name="outline">#FF2D3846</color>
+    <color name="text_primary">#FFF2F5F9</color>
+    <color name="text_secondary">#FFAAB4C3</color>
+    <color name="text_muted">#FF8994A5</color>
+    <color name="accent">#FF5CC8FF</color>
+    <color name="ok">#FF2FD39A</color>
+    <color name="warn">#FFFFB648</color>
+    <color name="err">#FFFF5F6D</color>
+</resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon (Android 13+) version of the foreground. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+
+    <path android:pathData="M40.5,47.5L44.2,39.6C44.9,38.1 46.4,37.2 48,37.2H60C61.6,37.2 63.1,38.1 63.8,39.6L67.5,47.5"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"/>
+    <path android:pathData="M36,64.5V56C36,51.3 39.8,47.5 44.5,47.5H63.5C68.2,47.5 72,51.3 72,56V64.5C72,66 70.8,67.2 69.3,67.2H38.7C37.2,67.2 36,66 36,64.5Z"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineJoin="round" android:fillColor="#00000000"/>
+    <path android:pathData="M40.5,71.5V67.2M67.5,71.5V67.2"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:fillColor="#00000000"/>
+    <path android:pathData="M42,56.5H66"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:fillColor="#00000000"/>
+</vector>

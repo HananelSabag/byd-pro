@@ -1,0 +1,26 @@
+<!-- Long-press the app icon: these open the app and run the command right away. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="lock" android:enabled="true" android:icon="@drawable/shortcut_lock"
+        android:shortcutShortLabel="@string/shortcut_lock" android:shortcutLongLabel="@string/shortcut_lock_long">
+        <intent android:action="com.example.byd.action.LOCK"
+            android:targetPackage="com.example.byd" android:targetClass="com.example.byd.MainActivity"/>
+    </shortcut>
+
+    <shortcut android:shortcutId="unlock" android:enabled="true" android:icon="@drawable/shortcut_unlock"
+        android:shortcutShortLabel="@string/shortcut_unlock" android:shortcutLongLabel="@string/shortcut_unlock_long">
+        <intent android:action="com.example.byd.action.UNLOCK"
+            android:targetPackage="com.example.byd" android:targetClass="com.example.byd.MainActivity"/>
+    </shortcut>
+
+    <shortcut android:shortcutId="trunk" android:enabled="true" android:icon="@drawable/shortcut_trunk"
+        android:shortcutShortLabel="@string/shortcut_trunk" android:shortcutLongLabel="@string/shortcut_trunk_long">
+        <intent android:action="com.example.byd.action.TRUNK"
+            android:targetPackage="com.example.byd" android:targetClass="com.example.byd.MainActivity"/>
+    </shortcut>
+
+    <shortcut android:shortcutId="climate" android:enabled="true" android:icon="@drawable/shortcut_climate"
+        android:shortcutShortLabel="@string/shortcut_climate" android:shortcutLongLabel="@string/shortcut_climate_long">
+        <intent android:action="com.example.byd.action.CLIMATE_ON"
+            android:targetPackage="com.example.byd" android:targetClass="com.example.byd.MainActivity"/>
+    </shortcut>
+</shortcuts>

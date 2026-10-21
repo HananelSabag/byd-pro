@@ -1,0 +1,22 @@
+# Render Blueprint: New -> Blueprint -> pick this repo. Fill the BYD values when asked.
+services:
+  - type: web
+    name: byd-pro-server
+    runtime: python
+    rootDir: server
+    plan: free
+    region: frankfurt # closest to BYD's European cloud
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+    envVars:
+      - key: BYD_USERNAME
+        sync: false
+      - key: BYD_PASSWORD
+        sync: false
+      - key: BYD_CONTROL_PIN
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.12.7

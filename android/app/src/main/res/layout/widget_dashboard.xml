@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dashboard widget (4x2): battery, range, lock state and four one-tap actions.
+     Rendered by WidgetRenderer; the default texts double as the picker preview. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:paddingStart="14dp" android:paddingEnd="10dp"
+        android:paddingTop="10dp" android:paddingBottom="10dp">
+
+        <LinearLayout android:id="@+id/d_header"
+            android:layout_width="match_parent" android:layout_height="32dp"
+            android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/d_name"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium" android:letterSpacing="0.06" android:maxLines="1"
+                android:text="ATTO 3" android:textColor="@color/text_primary" android:textSize="15sp"/>
+            <TextView android:id="@+id/d_lock"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:background="@drawable/widget_chip"
+                android:fontFamily="sans-serif-medium" android:maxLines="1"
+                android:paddingStart="8dp" android:paddingTop="2dp" android:paddingEnd="8dp" android:paddingBottom="2dp"
+                android:text="@string/state_locked" android:textColor="@color/ok" android:textSize="11sp"/>
+            <TextView android:id="@+id/d_status"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="6dp" android:background="@drawable/widget_chip"
+                android:fontFamily="sans-serif-medium" android:maxLines="1" android:ellipsize="end"
+                android:paddingStart="8dp" android:paddingTop="2dp" android:paddingEnd="8dp" android:paddingBottom="2dp"
+                android:text="" android:textColor="@color/accent" android:textSize="11sp" android:visibility="gone"/>
+            <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
+            <TextView android:id="@+id/d_updated"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:maxLines="1" android:text="14:32" android:textColor="@color/text_muted" android:textSize="11sp"/>
+            <FrameLayout android:layout_width="34dp" android:layout_height="34dp">
+                <ProgressBar android:id="@+id/d_refreshing"
+                    android:layout_width="18dp" android:layout_height="18dp" android:layout_gravity="center"
+                    android:indeterminate="true" android:indeterminateTint="@color/accent" android:visibility="gone"/>
+                <ImageView android:id="@+id/d_refresh"
+                    android:layout_width="34dp" android:layout_height="34dp"
+                    android:background="@drawable/widget_ripple" android:contentDescription="@string/action_refresh"
+                    android:padding="9dp" android:src="@drawable/ic_refresh" android:tint="@color/text_secondary"/>
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/d_body"
+            android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+            android:gravity="center_vertical" android:orientation="horizontal">
+            <LinearLayout
+                android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:orientation="vertical">
+                <LinearLayout
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:gravity="bottom" android:orientation="horizontal">
+                    <TextView android:id="@+id/d_soc"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium" android:includeFontPadding="false"
+                        android:text="78" android:textColor="@color/text_primary" android:textSize="34sp"/>
+                    <TextView
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginBottom="4dp" android:layout_marginStart="2dp"
+                        android:text="%" android:textColor="@color/accent" android:textSize="16sp"/>
+                    <ImageView android:id="@+id/d_bolt"
+                        android:layout_width="16dp" android:layout_height="16dp"
+                        android:layout_marginBottom="6dp" android:layout_marginStart="6dp"
+                        android:importantForAccessibility="no" android:src="@drawable/ic_bolt"
+                        android:tint="@color/ok" android:visibility="gone"/>
+                </LinearLayout>
+                <TextView android:id="@+id/d_range"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:maxLines="1" android:text="331 km" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+                <ProgressBar android:id="@+id/d_battery"
+                    style="@android:style/Widget.ProgressBar.Horizontal"
+                    android:layout_width="match_parent" android:layout_height="6dp"
+                    android:layout_marginEnd="10dp" android:layout_marginTop="6dp"
+                    android:max="100" android:progress="78" android:progressDrawable="@drawable/widget_battery"/>
+            </LinearLayout>
+            <ImageView android:id="@+id/d_car"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1.15"
+                android:adjustViewBounds="true" android:importantForAccessibility="no"
+                android:scaleType="fitCenter" android:src="@drawable/car_widget"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+        <FrameLayout android:id="@+id/d_btn_lock"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:layout_marginStart="3dp" android:layout_marginEnd="3dp"
+            android:background="@drawable/widget_btn" android:contentDescription="@string/cmd_lock">
+            <ProgressBar android:id="@+id/d_pb_lock"
+                android:layout_width="30dp" android:layout_height="30dp" android:layout_gravity="center"
+                android:indeterminate="true" android:indeterminateTint="@color/accent" android:visibility="gone"/>
+            <ImageView android:id="@+id/d_ic_lock"
+                android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_lock" android:tint="@color/text_primary" android:importantForAccessibility="no"/>
+        </FrameLayout>
+        <FrameLayout android:id="@+id/d_btn_unlock"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:layout_marginStart="3dp" android:layout_marginEnd="3dp"
+            android:background="@drawable/widget_btn" android:contentDescription="@string/cmd_unlock">
+            <ProgressBar android:id="@+id/d_pb_unlock"
+                android:layout_width="30dp" android:layout_height="30dp" android:layout_gravity="center"
+                android:indeterminate="true" android:indeterminateTint="@color/accent" android:visibility="gone"/>
+            <ImageView android:id="@+id/d_ic_unlock"
+                android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_unlock" android:tint="@color/text_primary" android:importantForAccessibility="no"/>
+        </FrameLayout>
+        <FrameLayout android:id="@+id/d_btn_trunk"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:layout_marginStart="3dp" android:layout_marginEnd="3dp"
+            android:background="@drawable/widget_btn" android:contentDescription="@string/cmd_trunk">
+            <ProgressBar android:id="@+id/d_pb_trunk"
+                android:layout_width="30dp" android:layout_height="30dp" android:layout_gravity="center"
+                android:indeterminate="true" android:indeterminateTint="@color/accent" android:visibility="gone"/>
+            <ImageView android:id="@+id/d_ic_trunk"
+                android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_trunk" android:tint="@color/text_primary" android:importantForAccessibility="no"/>
+        </FrameLayout>
+        <FrameLayout android:id="@+id/d_btn_climate"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:layout_marginStart="3dp" android:layout_marginEnd="3dp"
+            android:background="@drawable/widget_btn" android:contentDescription="@string/cmd_climate">
+            <ProgressBar android:id="@+id/d_pb_climate"
+                android:layout_width="30dp" android:layout_height="30dp" android:layout_gravity="center"
+                android:indeterminate="true" android:indeterminateTint="@color/accent" android:visibility="gone"/>
+            <ImageView android:id="@+id/d_ic_climate"
+                android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center"
+                android:src="@drawable/ic_snowflake" android:tint="@color/text_primary" android:importantForAccessibility="no"/>
+        </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

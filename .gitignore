@@ -1,0 +1,28 @@
+# Secrets and machine-specific files
+.env
+*.env.local
+local.properties
+*.jks
+*.keystore
+
+# Android / Gradle
+.gradle/
+build/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

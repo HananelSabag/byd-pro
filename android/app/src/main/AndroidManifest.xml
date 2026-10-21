@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Short haptic ack for widget / tile taps. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Widget / tile commands run as a short foreground service (a few seconds, while sending). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Charging started / finished alerts (asked for only when charging features are used). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Charging checks are alarms, which a reboot clears; this restores them. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.BYD">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.BYD"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Home-screen widgets -->
+        <receiver android:name=".widget.DashboardWidget" android:exported="false" android:label="@string/app_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_dashboard_info" />
+        </receiver>
+        <receiver android:name=".widget.LockWidget" android:exported="false" android:label="@string/cmd_lock">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_lock_info" />
+        </receiver>
+        <receiver android:name=".widget.UnlockWidget" android:exported="false" android:label="@string/cmd_unlock">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_unlock_info" />
+        </receiver>
+        <receiver android:name=".widget.TrunkWidget" android:exported="false" android:label="@string/cmd_trunk">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_trunk_info" />
+        </receiver>
+        <receiver android:name=".widget.ClimateWidget" android:exported="false" android:label="@string/cmd_climate">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_climate_info" />
+        </receiver>
+        <receiver android:name=".widget.LocateWidget" android:exported="false" android:label="@string/cmd_locate">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_locate_info" />
+        </receiver>
+        <receiver android:name=".widget.FlashWidget" android:exported="false" android:label="@string/cmd_flash">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_flash_info" />
+        </receiver>
+        <receiver android:name=".widget.WindowsWidget" android:exported="false" android:label="@string/w_windows">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_windows_info" />
+        </receiver>
+        <receiver android:name=".widget.ChargeWidget" android:exported="false" android:label="@string/charging_title">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_charge_info" />
+        </receiver>
+        <receiver android:name=".widget.WidgetClickReceiver" android:exported="false" />
+
+        <!-- Widget and tile commands: a short foreground service, so battery savers can't delay them. -->
+        <service
+            android:name=".work.CommandService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
+        <receiver android:name=".system.ChargeCheckReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+
+        <!-- Quick-settings tiles -->
+        <service
+            android:name=".tile.LockTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_lock"
+            android:label="@string/tile_lock"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+        <service
+            android:name=".tile.UnlockTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_unlock"
+            android:label="@string/tile_unlock"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+    </application>
+
+</manifest>

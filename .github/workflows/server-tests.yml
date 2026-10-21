@@ -1,0 +1,22 @@
+name: Server tests
+
+on:
+  push:
+    paths: ["server/**", ".github/workflows/server-tests.yml"]
+  pull_request:
+    paths: ["server/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r server/requirements.txt
+      - name: End-to-end tests against the fake car
+        working-directory: server/tests
+        env:
+          FAKE_LATENCY: "0.2"
+        run: python test_server.py
