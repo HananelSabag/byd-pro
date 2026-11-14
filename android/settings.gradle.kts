@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "BYD"
 include(":app")
+include(":wear")
  

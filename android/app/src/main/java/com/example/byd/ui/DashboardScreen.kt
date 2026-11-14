@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import android.os.Build
 import android.content.pm.PackageManager
 import android.Manifest
-import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -68,6 +67,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,11 +98,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.byd.BuildConfig
 import com.example.byd.R
+import com.example.byd.bus.Source
 import com.example.byd.data.AppPrefs
 import com.example.byd.data.CarCommand
 import com.example.byd.data.CarRepository
 import com.example.byd.data.CarSnapshot
 import com.example.byd.data.CarUiState
+import com.example.byd.data.ClimateMode
 import com.example.byd.data.Tires
 import com.example.byd.ui.theme.Numeric
 import com.example.byd.ui.theme.Palette
@@ -114,41 +122,28 @@ fun DashboardScreen(repo: CarRepository) {
     val scroll = rememberScrollState()
     // First run without a server configured: start in Settings, where it is set.
     var showSettings by rememberSaveable { mutableStateOf(repo.prefs.serverUrl.isBlank()) }
-    var climateTemp by remember { mutableIntStateOf(repo.prefs.climateTemp) }
     var heroOnScreen by remember { mutableStateOf(true) }
     var pulling by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    // Re-read the car whenever the app comes to the front. The server answers from its cache
-    // when the data is under a minute old, so this only wakes the car when it is really needed.
+    // Re-read the car when the app comes to the front, unless it was read in the last few
+    // seconds. The server answers from its cache when its data is recent, so the car is only
+    // woken when it is really needed.
     LifecycleStartEffect(Unit) {
-        repo.refreshAsync()
+        repo.refreshIfStale()
         onStopOrDispose { }
     }
 
-    // The car's answer: a confirm / reject haptic here, the message itself in ResultBanner.
-    LaunchedEffect(state.lastResult?.id) {
-        val result = state.lastResult ?: return@LaunchedEffect
-        if (SystemClock.elapsedRealtime() - result.finishedAt > 3_000) return@LaunchedEffect
-        if (repo.prefs.haptics) {
-            view.haptic(
-                when {
-                    result.ok -> Haptic.Confirm
-                    result.error?.soft == true -> Haptic.Tap
-                    else -> Haptic.Reject
-                },
-            )
-        }
-    }
-
+    // The car's answer buzzes once from the command bus (CarRepository), like a widget's or the
+    // watch's; the message itself is in ResultBanner. Here only the tap.
     val send: (CarCommand) -> Unit = { command ->
         if (repo.prefs.haptics) view.haptic(Haptic.Tap)
-        repo.sendAsync(command)
+        repo.run(command, source = Source.APP)
     }
     val sendWith: SendWith = { command, params ->
         if (repo.prefs.haptics) view.haptic(Haptic.Tap)
-        repo.sendAsync(command, params)
+        repo.run(command, params, Source.APP)
     }
     // Charging alerts need the notification permission (Android 13+); asked only when it's relevant.
     val wantsAlerts: () -> Unit = {
@@ -184,7 +179,7 @@ fun DashboardScreen(repo: CarRepository) {
                     Spacer(Modifier.height(12.dp))
                     CarSideView(
                         state.snapshot,
-                        warmAir = warmAir(state, climateTemp),
+                        warmAir = state.climateMode == ClimateMode.HEAT,
                         fx = heroFx(state),
                         animate = heroOnScreen,
                         online = state.online != false,
@@ -200,7 +195,7 @@ fun DashboardScreen(repo: CarRepository) {
                     Spacer(Modifier.height(22.dp))
                     QuickActions(state, send)
                     Spacer(Modifier.height(30.dp))
-                    ClimateSection(state, climateTemp, { climateTemp = it; repo.prefs.climateTemp = it }, repo.prefs, send, sendWith)
+                    ClimateSection(state, repo.prefs, send, sendWith)
                     Spacer(Modifier.height(30.dp))
                     ChargingSection(state, repo.prefs, sendWith, wantsAlerts)
                     Spacer(Modifier.height(30.dp))
@@ -237,23 +232,14 @@ fun DashboardScreen(repo: CarRepository) {
 
 /** What the car picture should play for a command the car just confirmed. */
 private fun heroFx(state: CarUiState): Pair<Long, HeroFx>? {
-    val result = state.lastResult?.takeIf { it.ok && SystemClock.elapsedRealtime() - it.finishedAt < 3_000 } ?: return null
+    val result = state.lastResult?.takeIf { it.ok && System.currentTimeMillis() - (it.finishedAt ?: 0L) < 3_000 } ?: return null
     return when (result.command) {
-        CarCommand.LOCK -> result.id to HeroFx.LOCKED
-        CarCommand.UNLOCK -> result.id to HeroFx.UNLOCKED
-        CarCommand.FLASH -> result.id to HeroFx.FLASH
-        CarCommand.LOCATE -> result.id to HeroFx.FIND
+        CarCommand.LOCK -> (result.finishedAt ?: 0L) to HeroFx.LOCKED
+        CarCommand.UNLOCK -> (result.finishedAt ?: 0L) to HeroFx.UNLOCKED
+        CarCommand.FLASH -> (result.finishedAt ?: 0L) to HeroFx.FLASH
+        CarCommand.LOCATE -> (result.finishedAt ?: 0L) to HeroFx.FIND
         else -> null
     }
-}
-
-/**
- * Heating or cooling: the temperature the A/C is running at (or the one chosen, before a start)
- * against the cabin's; a mild default when the cabin temperature is unknown.
- */
-private fun warmAir(state: CarUiState, chosen: Int): Boolean {
-    val target = if (state.snapshot.climateOn == true) state.climateSentTemp ?: chosen else chosen
-    return state.snapshot.cabinC?.let { target > it } ?: (target >= 24)
 }
 
 /** Lets a child reach past the column's side padding, out to the screen edges. */
@@ -420,17 +406,23 @@ private fun Metric(value: String, unit: String, @StringRes label: Int, valueColo
     }
 }
 
-/** Shown only when a command has been in flight for a while (sleeping car / cold server). */
+/** Shown while a sleeping server starts, or when a command has been on its way for a while (sleeping car). */
 @Composable
 private fun WakingBanner(state: CarUiState) {
     var slow by remember { mutableStateOf(false) }
     LaunchedEffect(state.pending) {
         slow = false
         val oldest = state.pending.values.minOrNull() ?: return@LaunchedEffect
-        delay((8_000 - (SystemClock.elapsedRealtime() - oldest)).coerceAtLeast(0))
+        delay((8_000 - (System.currentTimeMillis() - oldest)).coerceAtLeast(0))
         slow = true
     }
-    AnimatedVisibility(slow && state.pending.isNotEmpty(), enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+    val text = when {
+        state.warming -> R.string.st_waking_server_long
+        state.climateChecking -> R.string.climate_checking
+        else -> R.string.slow_hint
+    }
+    val visible = state.warming || state.climateChecking || (slow && state.pending.isNotEmpty())
+    AnimatedVisibility(visible, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
         Row(
             Modifier
                 .padding(top = 16.dp)
@@ -442,7 +434,7 @@ private fun WakingBanner(state: CarUiState) {
         ) {
             CircularProgressIndicator(Modifier.size(16.dp), color = Palette.Accent, strokeWidth = 2.dp)
             Spacer(Modifier.width(10.dp))
-            Text(stringResource(R.string.slow_hint), style = MaterialTheme.typography.bodySmall, color = Palette.TextPrimary)
+            Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = Palette.TextPrimary)
         }
     }
 }
@@ -507,23 +499,13 @@ private fun QuickActions(state: CarUiState, send: (CarCommand) -> Unit) {
 
 // ------------------------------------------------------------------ climate
 
-private val DURATIONS = listOf(10, 15, 20, 25, 30)
-
+/**
+ * Climate in one tap, like the car's own app: quick cool or quick heat with the saved run time
+ * and air source, and Stop while it runs. The air source and seat heating sit under it.
+ */
 @Composable
-private fun ClimateSection(
-    state: CarUiState,
-    temp: Int,
-    onTemp: (Int) -> Unit,
-    prefs: AppPrefs,
-    send: (CarCommand) -> Unit,
-    sendWith: SendWith,
-) {
+private fun ClimateSection(state: CarUiState, prefs: AppPrefs, send: (CarCommand) -> Unit, sendWith: SendWith) {
     val car = state.snapshot
-    val on = car.climateOn == true
-    // While the A/C runs, a new temperature is a draft: it reaches the car only with "Update".
-    val draft = on && state.climateSentTemp != null && temp != state.climateSentTemp
-    var minutes by remember { mutableIntStateOf(prefs.climateMinutes) }
-    val view = LocalView.current
     val readings = listOfNotNull(
         car.cabinC?.let { "${stringResource(R.string.cabin)} $it°" },
         car.outsideC?.let { "${stringResource(R.string.outside)} $it°" },
@@ -532,190 +514,151 @@ private fun ClimateSection(
     SectionHeader(R.string.climate_title, readings.ifEmpty { null })
     Spacer(Modifier.height(10.dp))
     Panel {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            StepButton(R.drawable.ic_minus, R.string.temp_down, enabled = temp > MIN_TEMP) {
-                onTemp(temp - 1)
-                view.haptic(Haptic.Tap)
-            }
-            Text(
-                "$temp°",
-                style = MaterialTheme.typography.displaySmall.merge(Numeric),
-                color = if (on && !draft) Palette.Accent else Palette.TextPrimary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f),
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            QuickStart(state, ClimateMode.COOL, prefs.climateMinutes, send, Modifier.weight(1f))
+            QuickStart(state, ClimateMode.HEAT, prefs.climateMinutes, send, Modifier.weight(1f))
+        }
+        // On, or not known to be off: Stop is right there.
+        AnimatedVisibility(
+            visible = car.climateOn != false || CarCommand.CLIMATE_OFF in state.pending,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            CommandButton(
+                command = CarCommand.CLIMATE_OFF,
+                label = R.string.climate_stop,
+                phase = rememberPhase(state, CarCommand.CLIMATE_OFF),
+                filled = car.climateOn == true,
+                onClick = { send(CarCommand.CLIMATE_OFF) },
+                modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
             )
-            StepButton(R.drawable.ic_plus, R.string.temp_up, enabled = temp < MAX_TEMP) {
-                onTemp(temp + 1)
-                view.haptic(Haptic.Tap)
-            }
         }
         Spacer(Modifier.height(12.dp))
-        QuickClimate(state, prefs) { target, air ->
-            onTemp(target)
-            sendWith(CarCommand.CLIMATE_ON, mapOf("temp" to "$target", "air" to air))
-        }
+        RecircRow(state, prefs, sendWith)
         Spacer(Modifier.height(10.dp))
         SeatHeatRow(state, sendWith)
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            DurationPicker(minutes) {
-                minutes = it
-                prefs.climateMinutes = it
-            }
-            val phase = rememberPhase(state, CarCommand.CLIMATE_ON, CarCommand.CLIMATE_OFF)
-            if (draft) {
-                CommandButton(
-                    command = CarCommand.CLIMATE_ON,
-                    label = R.string.cmd_climate_on,
-                    text = stringResource(R.string.climate_update, temp),
-                    phase = phase,
-                    filled = true,
-                    onClick = { send(CarCommand.CLIMATE_ON) },
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                CommandButton(
-                    command = if (on) CarCommand.CLIMATE_OFF else CarCommand.CLIMATE_ON,
-                    label = if (on) R.string.climate_stop else R.string.cmd_climate_on,
-                    phase = phase,
-                    filled = !on,
-                    onClick = { send(if (on) CarCommand.CLIMATE_OFF else CarCommand.CLIMATE_ON) },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            // State unknown, or the main button is "Update": keep a way to switch it off.
-            if (car.climateOn == null || draft) {
-                Box(
-                    Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Palette.SurfaceTop)
-                        .clickable(role = Role.Button, onClickLabel = stringResource(R.string.climate_stop)) {
-                            send(CarCommand.CLIMATE_OFF)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(painterResource(R.drawable.ic_power), stringResource(R.string.climate_stop), tint = Palette.TextSecondary)
-                }
-            }
-        }
     }
 }
 
-/** The car's range on its own scale (15-31 °C on the ATTO 3). */
-private const val MIN_TEMP = 15
-private const val MAX_TEMP = 31
+private val WarmTint = Palette.Heat
 
 /**
- * One-tap starts at the ends of the range, like the car's own app, plus the air source.
- * Cooling recirculates (fastest); heating takes outside air, which keeps the windows clear.
+ * A tall one-tap start: icon, name, and what it will do ("15° · 20 min"). While its mode runs it
+ * lights up and counts down; the other one switches the running A/C over.
  */
 @Composable
-private fun QuickClimate(state: CarUiState, prefs: AppPrefs, start: (Int, String) -> Unit) {
-    var recirculate by remember { mutableStateOf(prefs.climateRecirculate) }
-    val view = LocalView.current
-    val busy = state.pending.containsKey(CarCommand.CLIMATE_ON)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuickChip(R.drawable.ic_snowflake, R.string.climate_rapid_cool, Palette.Accent, enabled = !busy, Modifier.weight(1f)) {
-            start(MIN_TEMP, "recirc")
-        }
-        QuickChip(R.drawable.ic_flame, R.string.climate_rapid_heat, WarmTint, enabled = !busy, Modifier.weight(1f)) {
-            start(MAX_TEMP, "fresh")
-        }
-        Row(
-            Modifier
-                .weight(1f)
-                .height(44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (recirculate) Palette.Accent.copy(alpha = 0.14f) else Palette.SurfaceHigh)
-                .toggleable(value = recirculate, role = Role.Switch) {
-                    recirculate = it
-                    prefs.climateRecirculate = it
-                    view.haptic(Haptic.Tap)
-                }
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            val tint = if (recirculate) Palette.Accent else Palette.TextSecondary
-            Icon(painterResource(R.drawable.ic_recirc), null, tint = tint, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.climate_recirc), style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
-        }
-    }
-}
+private fun QuickStart(state: CarUiState, mode: ClimateMode, minutes: Int, send: (CarCommand) -> Unit, modifier: Modifier) {
+    val heat = mode == ClimateMode.HEAT
+    val command = if (heat) CarCommand.QUICK_HEAT else CarCommand.QUICK_COOL
+    val temp = if (heat) CarRepository.HEAT_TEMP else CarRepository.COOL_TEMP
+    val tint = if (heat) WarmTint else Palette.Accent
+    val running = state.climateMode == mode
+    val phase = rememberPhase(state, command)
+    val busy = phase is Phase.Busy
+    val blocked = !busy && state.isPending(CarCommand.CLIMATE)
+    val shake = rememberShake((phase as? Phase.Failed)?.result?.id)
+    val left = rememberMinutesLeft(state.snapshot.climateUntil.takeIf { running })
+    val detail = phaseSubtitle(
+        phase,
+        when {
+            running && left != null -> stringResource(R.string.climate_left, left)
+            running -> stringResource(R.string.climate_running)
+            else -> stringResource(R.string.quick_detail, temp, minutes)
+        },
+    ).orEmpty()
+    val background by animateColorAsState(tint.copy(alpha = if (running || busy) 0.24f else 0.11f), tween(260), label = "quick")
 
-private val WarmTint = Color(0xFFFF8A4C)
-
-@Composable
-private fun QuickChip(icon: Int, @StringRes label: Int, tint: Color, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    Row(
+    Column(
         modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(tint.copy(alpha = 0.12f))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+            .graphicsLayer { translationX = shake.value * density }
+            .clip(RoundedCornerShape(18.dp))
+            .background(background)
+            .clickable(enabled = !running && !busy && !blocked, role = Role.Button) { send(command) }
+            .semantics { stateDescription = detail }
+            .padding(horizontal = 14.dp, vertical = 14.dp),
     ) {
-        Icon(painterResource(icon), null, tint = tint, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(stringResource(label), style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
-    }
-}
-
-@Composable
-private fun StepButton(icon: Int, @StringRes label: Int, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(52.dp)
-            .clip(CircleShape)
-            .background(Palette.SurfaceHigh)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = stringResource(label), onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painterResource(icon), stringResource(label),
-            tint = if (enabled) Palette.TextPrimary else Palette.TextMuted.copy(alpha = 0.4f),
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            if (busy) CircularProgressIndicator(Modifier.fillMaxSize(), color = tint, strokeWidth = 2.dp)
+            Icon(painterResource(command.icon), null, tint = tint, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(command.label), style = MaterialTheme.typography.titleMedium, color = Palette.TextPrimary, maxLines = 1)
+        Text(
+            detail,
+            style = MaterialTheme.typography.bodySmall.merge(Numeric),
+            color = if (blocked) Palette.TextMuted else tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-/** Run time as one compact chip with a menu, instead of five chips competing for the row. */
+/**
+ * Whole minutes until [until] (epoch millis), ticking while on screen; null without an end.
+ * Rounds up, less a few seconds of slack: the end comes from the server's clock, and a phone a
+ * moment behind it would otherwise show "21 min" right after a 20-minute start.
+ */
 @Composable
-private fun DurationPicker(minutes: Int, onPick: (Int) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Row(
-            Modifier
-                .height(54.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Palette.SurfaceHigh)
-                .clickable(role = Role.DropdownList, onClickLabel = stringResource(R.string.climate_duration)) { open = true }
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(painterResource(R.drawable.ic_clock), null, tint = Palette.TextSecondary, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.minutes_short, minutes), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = Palette.TextPrimary)
+private fun rememberMinutesLeft(until: Long?): Int? {
+    val now by produceState(System.currentTimeMillis(), until) {
+        while (until != null) {
+            value = System.currentTimeMillis()
+            delay(15_000)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = Palette.SurfaceTop) {
-            DURATIONS.forEach { option ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(R.string.minutes_short, option),
-                            color = if (option == minutes) Palette.Accent else Palette.TextPrimary,
-                        )
-                    },
-                    onClick = {
-                        onPick(option)
-                        open = false
-                    },
-                )
+    }
+    return until?.let { (((it - now) - 10_000 + 59_999) / 60_000).toInt().coerceAtLeast(0) }
+}
+
+/**
+ * Air source. While the A/C runs it shows what the car reports, and a tap changes it in the car;
+ * otherwise it is the setting for the next start.
+ */
+@Composable
+private fun RecircRow(state: CarUiState, prefs: AppPrefs, sendWith: SendWith) {
+    val car = state.snapshot
+    val running = car.climateOn == true
+    var chosen by remember { mutableStateOf(prefs.climateRecirculate) }
+    val value = if (running) car.recirc ?: chosen else chosen
+    val busy = CarCommand.RECIRC in state.pending
+    val view = LocalView.current
+    val tint = if (value) Palette.Accent else Palette.TextSecondary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Palette.SurfaceHigh)
+            .toggleable(value = value, enabled = !busy, role = Role.Switch) { on ->
+                chosen = on
+                prefs.climateRecirculate = on
+                if (running) sendWith(CarCommand.RECIRC, mapOf("on" to if (on) "1" else "0")) else view.haptic(Haptic.Tap)
             }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painterResource(R.drawable.ic_recirc), null, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.climate_recirc_long), style = MaterialTheme.typography.bodyLarge, color = Palette.TextPrimary)
+            Text(
+                stringResource(if (busy) R.string.sending else if (value) R.string.air_recirc_hint else R.string.air_fresh_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (busy) Palette.Busy else Palette.TextMuted,
+            )
         }
+        Spacer(Modifier.width(10.dp))
+        Switch(
+            checked = value,
+            onCheckedChange = null, // the whole row toggles
+            enabled = !busy,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Palette.OnAccent,
+                checkedTrackColor = Palette.Accent,
+                uncheckedThumbColor = Palette.TextMuted,
+                uncheckedTrackColor = Palette.SurfaceTop,
+                uncheckedBorderColor = Palette.Outline,
+            ),
+        )
     }
 }
 
@@ -740,7 +683,6 @@ private fun VehicleSection(car: CarSnapshot) {
         car.tires?.let {
             if (!first) HorizontalDivider(color = Palette.Outline.copy(alpha = 0.7f))
             TireRow(it)
-            TireDiagram(it, Modifier.fillMaxWidth().height(230.dp).padding(bottom = 6.dp))
         }
     }
 }
@@ -756,7 +698,7 @@ private fun InfoRow(icon: Int, @StringRes label: Int, value: String) {
     }
 }
 
-/** One line of verdict ("Normal · 36 psi", or which wheel is low); the diagram below has all four. */
+/** One line of verdict ("Normal · 36 psi", or which wheel is low); the hero shows each axle's pair under its wheel. */
 @Composable
 private fun TireRow(tires: Tires) {
     val wheels = listOf(
@@ -801,13 +743,13 @@ fun tireUnit(unit: String): String = stringResource(
     },
 )
 
-private fun isLow(value: Double, unit: String): Boolean = when (unit) {
+internal fun isLow(value: Double, unit: String): Boolean = when (unit) {
     "psi" -> value < 29
     "kPa" -> value < 200
     else -> value < 2.0
 }
 
-private fun fmt(value: Double): String =
+internal fun fmt(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.ROOT, "%.1f", value)
 
 // ------------------------------------------------------------------ footer

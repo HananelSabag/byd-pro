@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget button while its command is on its way (widget_btn_busy): neutral, so it never reads as a state. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#338C99AA">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FFF1F5FA"/>
+            <corners android:radius="@dimen/widget_inner_radius"/>
+            <stroke android:width="1dp" android:color="#998C99AA"/>
+        </shape>
+    </item>
+</ripple>

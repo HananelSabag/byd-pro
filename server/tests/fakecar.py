@@ -1,54 +1,28 @@
-"""Dummy car for testing main.py without touching BYD or Render.
+"""Dummy car for testing the server without touching BYD or Render.
 
 Importing this module:
-  1. blocks every outbound connection except localhost (safety net), and
-  2. swaps pybyd.BydClient for FakeBydClient before main.py imports it.
+  1. blocks every outbound connection except localhost (safety net, in fake_endpoints), and
+  2. answers pybyd's calls from a fake BYD cloud that drives this car (the real pybyd client
+     and the server's own command loop run unchanged).
+
+Old names kept for the tests and the dummy server: CAR, CALLS, FAIL_NEXT, LATENCY.
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
-import socket
 import sys
 import time
+
+import fake_endpoints  # noqa: F401  (must come first: blocks the network)
 
 # Test credentials: the fake client never sends them anywhere.
 os.environ.setdefault("AUTH_SECRET", "test-secret")
 for _key in ("BYD_USERNAME", "BYD_PASSWORD", "BYD_CONTROL_PIN"):
     os.environ.setdefault(_key, "test")
+from fake_endpoints import VIN
 
-# ---------------------------------------------------------------- network block
-_LOCAL = {"127.0.0.1", "::1", "localhost", "0.0.0.0", "10.0.2.2"}
-_real_getaddrinfo = socket.getaddrinfo
-_real_connect = socket.socket.connect
-
-
-def _guard_getaddrinfo(host, *a, **k):
-    if host not in _LOCAL and host is not None:
-        raise OSError(f"[dummy] network blocked: {host}")
-    return _real_getaddrinfo(host, *a, **k)
-
-
-def _guard_connect(self, address):
-    host = address[0] if isinstance(address, tuple) else address
-    if host not in _LOCAL:
-        raise OSError(f"[dummy] network blocked: {address}")
-    return _real_connect(self, address)
-
-
-socket.getaddrinfo = _guard_getaddrinfo
-socket.socket.connect = _guard_connect
-
-# ---------------------------------------------------------------- fake client
-import pybyd  # noqa: E402
-from pybyd import BydRemoteControlError  # noqa: E402
-from pybyd.models import HvacStatus, VehicleCapabilities, VehicleRealtimeData  # noqa: E402
-from pybyd.models.vehicle import Vehicle  # noqa: E402
-
-CALLS: list[str] = []  # every simulated car command, for assertions
-LATENCY = float(os.environ.get("FAKE_LATENCY", "0.4"))
-FAIL_NEXT: dict[str, str] = {}  # action -> "timeout" | "rejected" (one-shot)
+TEMP_OFFSET_C = 14  # pybyd's default scale: A/C temperature = scale value + 14 °C
 
 
 class FakeCar:
@@ -56,6 +30,7 @@ class FakeCar:
         self.locked = True
         self.trunk = 0
         self.climate = False
+        self.climate_started = 0.0
         self.soc = 78.0
         self.seats = {"driver": 1, "passenger": 1}  # BYD status scale: 1 off, 2 low, 3 high
         self.schedule = {"status": 0, "start": "23:00", "end": "07:00"}
@@ -64,6 +39,13 @@ class FakeCar:
         self.windows = 1  # 1 closed, 2 open
         self.in_window = False  # inside the charging schedule window: "pause" can't stop the charge
         self.asleep = False  # an asleep car answers with an empty report
+        self.recirc = True  # air source of the running A/C (cycle mode 2)
+        self.set_c = 21.0  # A/C set temperature
+        self.hvac_ghost = False  # the overall A/C status says "on" while the fan stands still
+        self.hvac_fails = False  # the A/C endpoint errors out
+        self.hvac_lag_s = 0.0  # after an A/C start, the A/C report still says off for this long
+        self.charge_w = -7400  # battery power while charging (sign unconfirmed on the real car)
+        self.report_time: int | None = None  # pin the realtime report's own timestamp (an old report)
 
     def raw(self) -> dict:
         if self.asleep:
@@ -80,129 +62,76 @@ class FakeCar:
             "leftFrontTirepressure": 2.5, "rightFrontTirepressure": 2.5,
             "leftRearTirepressure": 2.4, "rightRearTirepressure": 2.6, "tirePressUnit": 1,
             "chargeState": self.charging, "nearestEnergyConsumption": "14.8",
+            "gl": self.charge_w if self.charging == 1 else 0,
             "mainSeatHeatState": self.seats["driver"], "copilotSeatHeatState": self.seats["passenger"],
-            "time": int(time.time()),
+            "time": self.report_time if self.report_time is not None else int(time.time()),
         }  # fmt: skip
+
+    def hvac_raw(self) -> dict:
+        lagging = self.climate and time.monotonic() < self.climate_started + self.hvac_lag_s
+        running = (self.climate and not lagging) or self.hvac_ghost
+        return {
+            "status": 1 if running else 2, "tempOutCar": 19, "tempInCar": 27,
+            "windPosition": 3 if (self.climate and not lagging) else 0, "cycleChoice": 2 if self.recirc else 1,
+            "mainSettingTempNew": self.set_c,
+        }  # fmt: skip
+
+    def schedule_raw(self) -> dict:
+        s = self.schedule
+        end = {"fullCharge": 1} if s["end"] == "full" else {"endTime": s["end"]}
+        return {"smartChargeDto": {"startTime": s["start"], **end, "status": s["status"]}}
+
+    def execute(self, action: str, params: dict | None) -> None:
+        """What the car does when a command reaches it."""
+        if action == "lock":
+            self.locked = True
+        elif action == "unlock":
+            self.locked = False
+        elif action == "climate_on":
+            self.climate = True
+            self.climate_started = time.monotonic()
+            self.recirc = (params or {}).get("cycleMode") == 2
+            self.set_c = float((params or {}).get("mainSettingTemp", 7)) + TEMP_OFFSET_C
+        elif action == "climate_off":
+            self.climate = False
+        elif action == "trunk_open":
+            self.trunk = 1
+        elif action == "trunk_close":
+            self.trunk = 0
+        elif action == "windows_close":
+            self.windows = 1
+        elif action == "windows_vent":
+            self.windows = 2
+        elif action == "seat":
+            status = {1: 3, 2: 2, 3: 1, 0: 1}  # command scale (1 high, 3 off) -> status scale
+            self.seats["driver"] = status[int((params or {}).get("mainHeat", 0))]
+            self.seats["passenger"] = status[int((params or {}).get("copilotHeat", 0))]
+        elif action == "charge_now":
+            self.charging = 1
+        elif action.startswith("toggle_smart:"):
+            enable = action.endswith("True")
+            self.schedule.update(status=1 if enable else 0)
+            if enable and not self.in_window:
+                self.charging = 0  # waits for its window again
+        elif action == "save_schedule":
+            p = params or {}
+            self.schedule.update(status=1, start=p.get("startChargeTime"), end=p.get("endChargeTime"))
 
 
 CAR = FakeCar()
+CLOUD = fake_endpoints.install(CAR)
+CALLS: list[str] = CLOUD.calls  # every simulated cloud/car call, for assertions
+FAIL_NEXT: dict[str, str] = CLOUD.fail_next  # action -> "timeout" | "rejected" (one-shot)
+LATENCY = CLOUD.latency
 
 
-class FakeBydClient:
-    def __init__(self, config, *, on_vehicle_info=None, **_):
-        self.config = config
-        self.on_vehicle_info = on_vehicle_info
-
-    async def async_start(self):
-        CALLS.append("start")
-
-    async def async_close(self):
-        CALLS.append("close")
-
-    async def get_vehicles(self):
-        await asyncio.sleep(0.05)
-        CALLS.append("get_vehicles")
-        return [Vehicle.model_validate({"vin": "LGXCE4CB0P0000000", "modelName": "ATTO 3", "autoAlias": "ATTO 3"})]
-
-    async def verify_command_access(self, vin):
-        CALLS.append("verify_pin")
-
-    async def get_vehicle_capabilities(self, vin, *, force_refresh=False):
-        CALLS.append("caps")
-        return VehicleCapabilities.model_validate(
-            {"vin": vin, "lock": True, "unlock": True, "climate": True, "findCar": True, "flashLights": True,
-             "openTrunk": True, "closeTrunk": True, "closeWindows": True, "openWindows": True,
-             "driverSeatHeat": True, "passengerSeatHeat": True, "startCharge": True}
-        )  # fmt: skip
-
-    async def get_vehicle_realtime(self, vin, **_):
-        await asyncio.sleep(LATENCY)
-        CALLS.append("realtime")
-        return VehicleRealtimeData.model_validate(CAR.raw())
-
-    async def get_hvac_status(self, vin):
-        await asyncio.sleep(0.05)
-        return HvacStatus.model_validate({"status": 1 if CAR.climate else 2, "tempOutCar": 19, "tempInCar": 27})
-
-    async def _cmd(self, name, effect=None):
-        await asyncio.sleep(LATENCY)
-        CALLS.append(name)
-        failure = FAIL_NEXT.pop(name, None)
-        if failure == "timeout":
-            raise asyncio.TimeoutError()
-        if failure == "rejected":
-            raise BydRemoteControlError("Remote control failed: controlState=2", code="2")
-        if effect:
-            effect()
-        if self.on_vehicle_info:  # the real car pushes fresh state over MQTT after a command
-            self.on_vehicle_info("LGXCE4CB0P0000000", VehicleRealtimeData.model_validate(CAR.raw()))
-
-    async def lock(self, vin):
-        await self._cmd("lock", lambda: setattr(CAR, "locked", True))
-
-    async def unlock(self, vin):
-        await self._cmd("unlock", lambda: setattr(CAR, "locked", False))
-
-    async def start_climate(self, vin, *, params):
-        CALLS.append(f"climate_params:{params.to_control_params_map()}")
-        await self._cmd("climate_on", lambda: setattr(CAR, "climate", True))
-
-    async def stop_climate(self, vin):
-        await self._cmd("climate_off", lambda: setattr(CAR, "climate", False))
-
-    async def find_car(self, vin):
-        await self._cmd("locate")
-
-    async def flash_lights(self, vin):
-        await self._cmd("flash")
-
-    async def open_trunk(self, vin):
-        await self._cmd("trunk_open", lambda: setattr(CAR, "trunk", 1))
-
-    async def close_trunk(self, vin):
-        await self._cmd("trunk_close", lambda: setattr(CAR, "trunk", 0))
-
-    async def close_windows(self, vin):
-        await self._cmd("windows_close", lambda: setattr(CAR, "windows", 1))
-
-    async def open_windows(self, vin):
-        await self._cmd("windows_vent", lambda: setattr(CAR, "windows", 2))
-
-    async def set_seat_climate(self, vin, *, params):
-        CALLS.append(f"seat_params:{params.to_control_params_map()}")
-        status = {1: 3, 2: 2, 3: 1, 0: 1}  # command scale (1 high, 3 off) -> status scale
-
-        def apply():
-            CAR.seats["driver"] = status[params.main_heat]
-            CAR.seats["passenger"] = status[params.copilot_heat]
-
-        await self._cmd("seat", apply)
-
-    async def start_charging(self, vin, **_):
-        await self._cmd("charge_now", lambda: setattr(CAR, "charging", 1))
-
-    async def toggle_smart_charging(self, vin, *, enable):
-        def apply():
-            CAR.schedule.update(status=1 if enable else 0)
-            if enable and not CAR.in_window:
-                CAR.charging = 0  # waits for its window again
-
-        await self._cmd(f"toggle_smart:{enable}", apply)
-
-    async def save_charging_schedule(self, vin, *, start_charge_time, end_charge_time, charge_way, enabled=True, **_):
-        CALLS.append(f"schedule:{start_charge_time}-{end_charge_time}:{charge_way}:{enabled}")
-        await self._cmd("save_schedule", lambda: CAR.schedule.update(status=1, start=start_charge_time, end=end_charge_time))
-
-    async def get_charging_schedule(self, vin):
-        from pybyd.models.smart_charging import SmartChargingSchedule
-        s = CAR.schedule
-        end = {"fullCharge": 1} if s["end"] == "full" else {"endTime": s["end"]}
-        return SmartChargingSchedule.model_validate(
-            {"vin": vin, "smartChargeDto": {"startTime": s["start"], **end, "status": s["status"]}}
-        )
+def reset() -> None:
+    """A fresh car and a healthy cloud (between test scenarios)."""
+    CAR.__init__()
+    CLOUD.reset()
 
 
-pybyd.BydClient = FakeBydClient
+__all__ = ["CALLS", "CAR", "CLOUD", "FAIL_NEXT", "LATENCY", "VIN", "FakeCar", "reset"]
 
 SERVER_DIR = os.environ.get("BYD_SERVER_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR:

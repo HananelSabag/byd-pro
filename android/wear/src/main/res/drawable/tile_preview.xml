@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Grey ATTO 3 seen from the side (front to the left), from the phone app's car drawing. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="118dp" android:height="50dp"
+    android:viewportWidth="590" android:viewportHeight="250">
+    <!-- body -->
+    <path android:fillColor="#FF8E99A6"
+        android:pathData="M30 200C20 196 14 186 13 168L13 146C13 128 18 116 26 108C60 96 118 86 162 80C190 62 214 42 236 30C300 20 420 18 480 24C505 26 522 29 534 34C546 50 556 66 563 82C571 96 576 110 577 128L577 168C577 182 571 192 560 196L538 196A58 58 0 1 0 424 196L174 196A58 58 0 1 0 60 196L30 200Z" />
+    <!-- shoulder line -->
+    <path android:strokeColor="#FFB3BDC8" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M40 104C90 95 140 91 182 93M458 87C492 83 526 79 556 77" />
+    <!-- glass -->
+    <path android:fillColor="#FF27303B"
+        android:pathData="M198 86L244 38C270 34 300 32 331 31L333 81C290 82 240 84 198 86Z M339 31L452 31L455 77C420 78 380 79 337 81Z M459 31C490 33 512 40 531 58L536 64C508 68 484 73 460 76Z" />
+    <!-- wheels -->
+    <path android:fillColor="#FF171C23"
+        android:pathData="M67 196a50 50 0 1 0 100 0a50 50 0 1 0 -100 0Z M431 196a50 50 0 1 0 100 0a50 50 0 1 0 -100 0Z" />
+    <path android:fillColor="#FF66717E"
+        android:pathData="M90 196a27 27 0 1 0 54 0a27 27 0 1 0 -54 0Z M454 196a27 27 0 1 0 54 0a27 27 0 1 0 -54 0Z" />
+</vector>

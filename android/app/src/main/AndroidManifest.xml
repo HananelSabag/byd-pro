@@ -76,9 +76,27 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_charge_info" />
         </receiver>
+        <receiver android:name=".widget.QuickCoolWidget" android:exported="false" android:label="@string/cmd_quick_cool">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quick_cool_info" />
+        </receiver>
+        <receiver android:name=".widget.QuickHeatWidget" android:exported="false" android:label="@string/cmd_quick_heat">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quick_heat_info" />
+        </receiver>
         <receiver android:name=".widget.WidgetClickReceiver" android:exported="false" />
 
-        <!-- Widget and tile commands: a short foreground service, so battery savers can't delay them. -->
+        <!-- "Start quick heat?" over the home screen, in its own task so the app doesn't come forward. -->
+        <activity
+            android:name=".widget.ConfirmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.BYD.Confirm" />
+
+        <!-- Keeps the app alive while a command (from anywhere) is on its way: a short foreground
+             service, so battery savers can't freeze it halfway. -->
         <service
             android:name=".work.CommandService"
             android:exported="false"
@@ -86,6 +104,23 @@
         <receiver android:name=".system.ChargeCheckReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
+
+        <!-- Taps from the watch app (Wearable Data Layer messages under /byd). -->
+        <service android:name=".system.WearListener" android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/byd" />
+            </intent-filter>
+        </service>
+
+        <!-- Settings → Share debug log hands the log file to the chosen app through this. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- Quick-settings tiles -->
         <service

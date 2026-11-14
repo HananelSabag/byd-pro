@@ -7,12 +7,24 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.byd.bus.Feel
 
-/** Short system vibrations for widget / tile feedback (the app itself uses View haptics). */
+/**
+ * Short system vibrations: the tap of a widget / tile, and every command's result on the phone
+ * (once per command, whatever it was tapped on: see CarRepository.onAnswered and Outcomes).
+ */
 object Buzz {
     fun tap(context: Context) = play(context, VibrationEffect.EFFECT_TICK, longArrayOf(0, 12))
     fun success(context: Context) = play(context, VibrationEffect.EFFECT_CLICK, longArrayOf(0, 30))
+    fun soft(context: Context) = play(context, VibrationEffect.EFFECT_HEAVY_CLICK, longArrayOf(0, 20, 120, 20))
     fun failure(context: Context) = play(context, VibrationEffect.EFFECT_DOUBLE_CLICK, longArrayOf(0, 40, 90, 40))
+
+    fun result(context: Context, feel: Feel) = when (feel) {
+        Feel.SUCCESS -> success(context)
+        Feel.SOFT -> soft(context)
+        Feel.FAILURE -> failure(context)
+        Feel.NONE -> Unit
+    }
 
     private fun play(context: Context, predefined: Int, fallback: LongArray) {
         val vibrator = vibrator(context)?.takeIf { it.hasVibrator() } ?: return

@@ -26,8 +26,8 @@ android {
         applicationId = "com.example.byd"
         minSdk = 26
         targetSdk = 37
-        versionCode = 8
-        versionName = "2.6"
+        versionCode = 11
+        versionName = "2.8"
 
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
         buildConfigField("String", "DEFAULT_SERVER_SECRET", "\"$serverSecret\"")
@@ -68,7 +68,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
+    implementation(libs.play.services.wearable)
+    implementation(libs.kotlinx.coroutines.play.services)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

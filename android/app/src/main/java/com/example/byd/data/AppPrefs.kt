@@ -31,13 +31,24 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean("climate_recirc", true)
         set(value) = prefs.edit { putBoolean("climate_recirc", value) }
 
+    /** A/C run time for every start (quick cool / heat, widgets, watch): 10, 15, 20, 25 or 30. */
     var climateMinutes: Int
-        get() = prefs.getInt("climate_minutes", 10)
+        get() = prefs.getInt("climate_minutes", 20)
         set(value) = prefs.edit { putInt("climate_minutes", value) }
 
     var chargeAlerts: Boolean
         get() = prefs.getBoolean("charge_alerts", true)
         set(value) = prefs.edit { putBoolean("charge_alerts", value) }
+
+    /** The check every two hours, 08:00–20:00 (work/CheckWorker). */
+    var autoCheck: Boolean
+        get() = prefs.getBoolean("auto_check", true)
+        set(value) = prefs.edit { putBoolean("auto_check", value) }
+
+    /** What the last check found ("" = all fine), so a problem is announced once until it changes. */
+    var lastCheckAlert: String
+        get() = prefs.getString("last_check_alert", "") ?: ""
+        set(value) = prefs.edit { putString("last_check_alert", value) }
 
     /** Last charging-schedule mode chosen in the app: stop_only, start_only or window. */
     var scheduleMode: String

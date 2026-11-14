@@ -2,7 +2,7 @@ package com.example.byd.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -12,22 +12,26 @@ import androidx.compose.ui.unit.sp
 
 /** Same values as res/values/colors.xml, so app and widgets match exactly. */
 object Palette {
-    // Deep navy graphite instead of pure black: reads as a lit cabin, not an empty screen.
-    val BackdropTop = Color(0xFF151D29)
-    val Bg = Color(0xFF0E131B)
-    val Backdrop = Brush.verticalGradient(0f to BackdropTop, 0.42f to Bg, 1f to Color(0xFF0B0F15))
-    val Surface = Color(0xFF172029)
-    val SurfaceHigh = Color(0xFF1D2632)
-    val SurfaceTop = Color(0xFF253041)
-    val Outline = Color(0xFF2D3846)
-    val TextPrimary = Color(0xFFF2F5F9)
-    val TextSecondary = Color(0xFFAAB4C3)
-    val TextMuted = Color(0xFF8994A5)
-    val Accent = Color(0xFF5CC8FF)
-    val OnAccent = Color(0xFF03141E)
-    val Ok = Color(0xFF2FD39A)
-    val Warn = Color(0xFFFFB648)
-    val Err = Color(0xFFFF5F6D)
+    // Light and calm: soft sky at the top fading to white, like a showroom. Text and state colours
+    // are darkened so they keep at least 4.5:1 contrast on white.
+    val BackdropTop = Color(0xFFC9E2F8)
+    val Bg = Color(0xFFFFFFFF)
+    val Backdrop = Brush.verticalGradient(0f to BackdropTop, 0.45f to Color(0xFFE9F3FC), 0.72f to Bg, 1f to Bg)
+    val Surface = Color(0xFFFFFFFF)
+    val SurfaceHigh = Color(0xFFF1F5FA)
+    val SurfaceTop = Color(0xFFE4EBF3)
+    val Outline = Color(0xFFD9E2EC)
+    val TextPrimary = Color(0xFF0F1B2B)
+    val TextSecondary = Color(0xFF44546A)
+    val TextMuted = Color(0xFF66758A)
+    val Accent = Color(0xFF1E78D8)
+    val OnAccent = Color(0xFFFFFFFF)
+    val Ok = Color(0xFF1E78D8)
+    val Warn = Color(0xFFD63C3C)
+    val Err = Color(0xFFD63C3C)
+    val Busy = Color(0xFF8C99AA) // a command on its way: neutral, never a state colour
+    val Soft = Color(0xFFB86E00) // sent but not confirmed yet / still checking
+    val Heat = Color(0xFFD9601A) // heating: readable orange on white
 }
 
 /** Tabular figures: numbers that change (%, km, timers) don't make the text jump. */
@@ -43,11 +47,11 @@ private val AppTypography = Typography().run {
     )
 }
 
-/** Always dark: an automotive cockpit look that also saves power on OLED screens. */
+/** Light: sky-to-white backdrop, white cards, dark text. */
 @Composable
 fun BydTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = darkColorScheme(
+        colorScheme = lightColorScheme(
             primary = Palette.Accent,
             onPrimary = Palette.OnAccent,
             secondary = Palette.Ok,

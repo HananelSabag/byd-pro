@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shared palette for widgets/launcher. Compose uses the same values (ui/theme/Theme.kt). -->
 <resources>
-    <color name="bg">#FF0E131B</color>
-    <color name="surface">#FF172029</color>
-    <color name="surface_high">#FF1D2632</color>
-    <color name="surface_top">#FF253041</color>
-    <color name="outline">#FF2D3846</color>
-    <color name="text_primary">#FFF2F5F9</color>
-    <color name="text_secondary">#FFAAB4C3</color>
-    <color name="text_muted">#FF8994A5</color>
-    <color name="accent">#FF5CC8FF</color>
-    <color name="ok">#FF2FD39A</color>
-    <color name="warn">#FFFFB648</color>
-    <color name="err">#FFFF5F6D</color>
+    <color name="bg">#FFFFFFFF</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="surface_high">#FFF1F5FA</color>
+    <color name="surface_top">#FFE4EBF3</color>
+    <color name="outline">#FFD9E2EC</color>
+    <color name="text_primary">#FF0F1B2B</color>
+    <color name="text_secondary">#FF44546A</color>
+    <color name="text_muted">#FF66758A</color>
+    <color name="accent">#FF1E78D8</color>
+    <color name="ok">#FF1E78D8</color>
+    <color name="warn">#FFD63C3C</color>
+    <color name="warm">#FFD9601A</color>
+    <color name="err">#FFD63C3C</color>
+    <!-- A command on its way: neutral, never a state colour. -->
+    <color name="busy">#FF8C99AA</color>
+    <!-- Sent but not confirmed yet / still checking. -->
+    <color name="soft">#FFB86E00</color>
 </resources>

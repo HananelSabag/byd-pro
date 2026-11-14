@@ -69,11 +69,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.mutableLongStateOf
 import com.example.byd.R
+import com.example.byd.bus.CommandRecord
+import com.example.byd.bus.Display
+import com.example.byd.bus.Outcomes
+import com.example.byd.bus.Tone
 import com.example.byd.data.CarCommand
-import com.example.byd.data.CarRepository
 import com.example.byd.data.CarUiState
-import com.example.byd.data.CommandResult
 import com.example.byd.ui.theme.Numeric
 import com.example.byd.ui.theme.Palette
 import kotlinx.coroutines.delay
@@ -81,42 +84,47 @@ import kotlin.math.roundToInt
 
 // ------------------------------------------------------------------ command phase
 
-/** What a command control should show right now. */
+/** What a command control should show right now (from the shared table in [Outcomes]). */
 sealed interface Phase {
     data object Idle : Phase
-    data class Busy(val since: Long) : Phase
-    data class Done(val result: CommandResult) : Phase
-    data class Failed(val result: CommandResult) : Phase
+    data class Busy(val since: Long, val display: Display) : Phase
+    data class Done(val result: CommandRecord) : Phase
+    data class Failed(val result: CommandRecord) : Phase
 }
 
 @Composable
 fun rememberPhase(state: CarUiState, vararg commands: CarCommand): Phase {
-    val since = commands.mapNotNull { state.pending[it] }.minOrNull()
-    val result = state.lastResult?.takeIf { it.command in commands }
-    var showResult by remember(result?.id) {
-        mutableStateOf(result != null && SystemClock.elapsedRealtime() - result.finishedAt < CarRepository.RESULT_SHOW_MS)
+    val record = state.latest(commands.toList())
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(record?.id, record?.finishedAt) {
+        val finished = record?.finishedAt ?: return@LaunchedEffect
+        val left = Outcomes.SHOW_MS - (System.currentTimeMillis() - finished)
+        if (left > 0) delay(left + 20)
+        now = System.currentTimeMillis() // the answer's moment is over: draw the normal state
     }
-    LaunchedEffect(result?.id) {
-        if (result != null) {
-            delay(CarRepository.RESULT_SHOW_MS - (SystemClock.elapsedRealtime() - result.finishedAt))
-            showResult = false
-        }
-    }
-    return when {
-        since != null -> Phase.Busy(since)
-        result != null && showResult -> when {
-            result.ok -> Phase.Done(result)
-            result.error?.soft == true -> Phase.Idle // e.g. "not confirmed yet": no shake, the banner explains
-            else -> Phase.Failed(result)
-        }
-        else -> Phase.Idle
+    record ?: return Phase.Idle
+    if (!record.terminal) return Phase.Busy(record.createdAt, Outcomes.of(record))
+    if (!Outcomes.showing(record, maxOf(now, System.currentTimeMillis()))) return Phase.Idle
+    return when (Outcomes.of(record).tone) {
+        Tone.OK -> Phase.Done(record)
+        Tone.ERR -> Phase.Failed(record)
+        else -> Phase.Idle // e.g. "not confirmed": no shake, the banner explains
     }
 }
 
-/** Button subtitle: "Sending…" while the car works on it, otherwise the control's own state text. */
+/** Button subtitle: the command's step ("Waking server…", "Sending…") while busy, otherwise the control's own state text. */
 @Composable
 fun phaseSubtitle(phase: Phase, idle: String?): String? =
-    if (phase is Phase.Busy) stringResource(R.string.sending) else idle
+    if (phase is Phase.Busy) stringResource(phase.display.label) else idle
+
+/** Compose's colour for an outcome tone (widgets: Outcomes.colorRes). Recolour here. */
+fun toneColor(tone: Tone): Color = when (tone) {
+    Tone.IDLE -> Palette.TextPrimary
+    Tone.BUSY -> Palette.Busy
+    Tone.OK -> Palette.Ok
+    Tone.WARN -> Palette.Soft
+    Tone.ERR -> Palette.Err
+}
 
 fun phaseColor(phase: Phase, active: Boolean, activeColor: Color): Color = when {
     phase is Phase.Busy -> Palette.Accent
@@ -126,7 +134,7 @@ fun phaseColor(phase: Phase, active: Boolean, activeColor: Color): Color = when 
 
 /** A short horizontal shake, played once per failed result. */
 @Composable
-fun rememberShake(trigger: Long?): Animatable<Float, *> {
+fun rememberShake(trigger: Any?): Animatable<Float, *> {
     val shake = remember { Animatable(0f) }
     LaunchedEffect(trigger) {
         if (trigger != null) {
@@ -213,111 +221,69 @@ private fun PhaseIcon(@DrawableRes icon: Int, tint: Color, size: Int) {
 // ------------------------------------------------------------------ lock switch
 
 /**
- * Lock / unlock as one two-sided switch. The lit thumb sits on the car's state and slides to the
- * other side the moment a command is sent, so the control shows both "where it is" and "where
- * it's going". In RTL the sides mirror with the layout (offset is direction-aware).
+ * One lock button, like on / off: it shows the car's last known state (blue locked, red unlocked)
+ * and a tap sends the opposite. With the state unknown it locks, the safe side.
  */
 @Composable
 fun LockSwitch(state: CarUiState, onCommand: (CarCommand) -> Unit, modifier: Modifier = Modifier) {
-    val lockPhase = rememberPhase(state, CarCommand.LOCK)
-    val unlockPhase = rememberPhase(state, CarCommand.UNLOCK)
+    val phase = rememberPhase(state, CarCommand.LOCK, CarCommand.UNLOCK)
     val locked = state.snapshot.locked
-    val side = when {
-        lockPhase is Phase.Busy -> 0
-        unlockPhase is Phase.Busy -> 1
-        locked == true -> 0
-        locked == false -> 1
-        else -> null
-    }
-    val busy = lockPhase is Phase.Busy || unlockPhase is Phase.Busy
-    val failed = (lockPhase as? Phase.Failed)?.result?.id ?: (unlockPhase as? Phase.Failed)?.result?.id
-    val shake = rememberShake(failed)
-    val position by animateFloatAsState(
-        (side ?: 0).toFloat(), spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow), label = "thumb",
-    )
-    val thumb by animateColorAsState(
+    val next = if (locked == true) CarCommand.UNLOCK else CarCommand.LOCK
+    val busy = phase is Phase.Busy
+    val shake = rememberShake((phase as? Phase.Failed)?.result?.id)
+    val tint by animateColorAsState(
         when {
-            side == null -> Color.Transparent
-            busy -> Palette.Accent
-            side == 0 -> Palette.Ok
-            else -> Palette.Warn
+            busy -> Palette.Busy
+            locked == true -> Palette.Ok
+            locked == false -> Palette.Warn
+            else -> Palette.TextMuted
         },
-        tween(240), label = "thumbColor",
+        tween(240), label = "lockTint",
     )
-    val outer = RoundedCornerShape(22.dp)
-    val inner = RoundedCornerShape(17.dp)
-
-    BoxWithConstraints(
+    val thumb by animateFloatAsState(if (locked == true) 1f else 0f, spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow), label = "thumb")
+    val title = stringResource(
+        when (locked) {
+            true -> R.string.state_locked
+            false -> R.string.state_unlocked
+            null -> R.string.lock_unknown
+        },
+    )
+    val hint = phaseSubtitle(phase, stringResource(if (next == CarCommand.LOCK) R.string.tap_to_lock else R.string.tap_to_unlock))
+    val shape = RoundedCornerShape(22.dp)
+    Row(
         modifier
             .fillMaxWidth()
             .height(78.dp)
             .graphicsLayer { translationX = shake.value * density }
-            .clip(outer)
+            .clip(shape)
             .background(Palette.Surface)
-            .border(1.dp, Palette.Outline, outer)
-            .padding(5.dp),
-    ) {
-        val half = maxWidth / 2
-        Box(
-            Modifier
-                .width(half)
-                .fillMaxHeight()
-                .offset { IntOffset((position * half.toPx()).roundToInt(), 0) }
-                .clip(inner)
-                .background(thumb.copy(alpha = 0.15f))
-                .border(1.dp, thumb.copy(alpha = 0.55f), inner),
-        )
-        Row(Modifier.fillMaxSize()) {
-            LockHalf(
-                CarCommand.LOCK, lockPhase, active = locked == true, activeColor = Palette.Ok,
-                idle = if (locked == true) stringResource(R.string.state_locked) else null,
-            ) { onCommand(CarCommand.LOCK) }
-            LockHalf(
-                CarCommand.UNLOCK, unlockPhase, active = locked == false, activeColor = Palette.Warn,
-                idle = if (locked == false) stringResource(R.string.state_unlocked) else null,
-            ) { onCommand(CarCommand.UNLOCK) }
-        }
-    }
-}
-
-@Composable
-private fun RowScope.LockHalf(
-    command: CarCommand,
-    phase: Phase,
-    active: Boolean,
-    activeColor: Color,
-    idle: String?,
-    onClick: () -> Unit,
-) {
-    val tint by animateColorAsState(phaseColor(phase, active, activeColor), tween(220), label = "tint")
-    val subtitle = phaseSubtitle(phase, idle)
-    Row(
-        Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(17.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { if (subtitle != null) stateDescription = subtitle }
-            .padding(horizontal = 10.dp),
+            .background(tint.copy(alpha = 0.08f))
+            .border(1.5.dp, tint.copy(alpha = 0.5f), shape)
+            .clickable(enabled = !busy, role = Role.Switch) { onCommand(next) }
+            .semantics { stateDescription = title }
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
     ) {
-        Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
-            if (phase is Phase.Busy) CircularProgressIndicator(Modifier.fillMaxSize(), color = Palette.Accent, strokeWidth = 2.dp)
-            PhaseIcon(command.icon, tint, 22)
+        Box(Modifier.size(46.dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+            if (busy) CircularProgressIndicator(Modifier.fillMaxSize(), color = Palette.Busy, strokeWidth = 2.dp)
+            PhaseIcon(if (locked == false) R.drawable.ic_unlock else R.drawable.ic_lock, tint, 24)
         }
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(stringResource(command.label), style = MaterialTheme.typography.titleMedium, color = Palette.TextPrimary, maxLines = 1)
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall.merge(Numeric),
-                    color = tint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = Palette.TextPrimary, maxLines = 1)
+            if (hint != null) {
+                Text(hint, style = MaterialTheme.typography.bodySmall.merge(Numeric), color = Palette.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+        // The on / off track: thumb at the end while locked.
+        BoxWithConstraints(Modifier.width(54.dp).height(30.dp).clip(RoundedCornerShape(15.dp)).background(tint.copy(alpha = 0.22f)).padding(3.dp)) {
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .offset { IntOffset(((maxWidth - 24.dp).toPx() * thumb).roundToInt(), 0) }
+                    .clip(CircleShape)
+                    .background(tint),
+            )
         }
     }
 }

@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import com.example.byd.bus.Source
 import com.example.byd.data.CarRepository
 import com.example.byd.work.CommandService
 
@@ -29,6 +30,8 @@ class LocateWidget : QuickWidget(QuickAction.LOCATE)
 class FlashWidget : QuickWidget(QuickAction.FLASH)
 class WindowsWidget : QuickWidget(QuickAction.WINDOWS)
 class ChargeWidget : QuickWidget(QuickAction.CHARGE)
+class QuickCoolWidget : QuickWidget(QuickAction.COOL)
+class QuickHeatWidget : QuickWidget(QuickAction.HEAT)
 
 /** Resizable dashboard: full 4x2 layout, or one compact row when made short. */
 class DashboardWidget : AppWidgetProvider() {
@@ -42,13 +45,13 @@ class DashboardWidget : AppWidgetProvider() {
     }
 }
 
-/** Every widget tap lands here: instant visual + haptic ack, then the command runs in [CommandService]. */
+/** Every widget tap lands here: instant haptic ack, then the command goes on the bus (same path as the app's). */
 class WidgetClickReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_QUICK -> {
                 val action = QuickAction.entries.getOrNull(intent.getIntExtra(EXTRA_ACTION, -1)) ?: return
-                CommandService.run(context, action)
+                CommandService.tap(context, action, Source.WIDGET)
             }
             ACTION_REFRESH -> CommandService.refresh(context)
         }

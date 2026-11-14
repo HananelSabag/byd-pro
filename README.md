@@ -2,7 +2,7 @@
 
 # BYD Pro
 
-**Remote control for the BYD ATTO 3: an Android app with a live, animated car, home-screen widgets and quick-settings tiles, backed by a small Python server that talks to the BYD cloud.**
+**Remote control for the BYD ATTO 3: an Android app with a live, animated car, home-screen widgets, quick-settings tiles and a Wear OS companion, backed by a small Python server that talks to the BYD cloud.**
 
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)
 ![Kotlin + Jetpack Compose](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)
@@ -37,25 +37,32 @@ The ATTO 3 is drawn in code, side view, and split into moving parts:
 
 | | |
 |---|---|
-| **Lock / unlock** | Sliding switch, padlock badge on confirmation |
+| **Lock toggle** | One switch everywhere (app, widgets, tiles, watch): it shows the last known state and a tap does the opposite; an unknown state locks |
 | **Tailgate, windows** | One-tap toggles; windows only ever *close* when their state is unknown |
 | **Find car, flash lights** | Horn and lights, or lights only |
-| **Climate** | 15–31 °C, run time 10–30 min, rapid cool / rapid heat, recirculation; a temperature change while running waits for *Update to 23°* instead of sending on its own |
+| **Climate** | *Quick Cool* / *Quick Heat* in one tap, or 15–31 °C, run time 10–30 min and recirculation; a temperature change while running waits for *Update to 23°* instead of sending on its own |
 | **Seat heating** | Driver and passenger, three levels; taps are batched into one command |
 | **Charging** | Start, pause (verified with the car), schedule: stop at / start at / between, with optional start and finish notifications |
-| **Tyres** | Pressure per wheel on a top-view diagram |
+| **Tyres** | Pressure per axle, summarised in one line ("OK · 2.4–2.6 bar") |
 
 ### Widgets, tiles and shortcuts
 
-- **Eight 1×1 widgets** (lock, unlock, tailgate, climate, find, lights, windows, charge) that adapt to the cell: icon only, icon and name, or icon, name and state.
+- **1×1 widgets** (lock toggle, tailgate, climate, Quick Cool, Quick Heat, find, lights, windows, charge) that adapt to the cell: icon only, icon and name, or icon, name and state. Quick Cool and Quick Heat ask for confirmation first.
 - **Resizable dashboard widget** with battery, range, a live status chip and four actions.
 - Widgets can be added straight from *Settings → Home-screen widgets*.
 - **Quick-settings tiles** for lock and unlock, and **launcher shortcuts**.
 - Widget and tile taps run as a short foreground service, so phone battery savers (OnePlus, Xiaomi, Samsung…) can't hold them back. A tap that would reach the car late is dropped: after 45 s for unlock, tailgate, windows, climate and horn; after 10 min for anything.
 
+### Wear OS watch
+
+- A watch app synced through the phone (Wearable Data Layer): the lock toggle, tailgate, climate, and a tile.
+- The phone acknowledges a tap at once; *No answer from the phone* appears only when there really is no link (8 s).
+- The command's progress (*Sending…*, *Done*, *Failed*) shows at the top and on the tile.
+
 ### Built to be light on both batteries
 
-- No background polling, ever.
+- No polling. One optional daytime check every 2 hours (08:00–20:00, at most six reads a day) notifies when the car was left unlocked or with a door, window or the tailgate open, once per change. It can be turned off in Settings.
+- The server counts every car read, command and byte it exchanges with BYD; *Settings → Car data today* shows it (for example "7 reads · 3 commands · ~60 KB").
 - The app reads the car when it opens; the server answers from a short cache, so the car isn't woken for every glance.
 - Looping animations run only while the car picture is on screen.
 
@@ -64,6 +71,8 @@ The ATTO 3 is drawn in code, side view, and split into moving parts:
 Hebrew-first (right-to-left) with a complete English UI. Language can be switched in the app.
 
 ## Screenshots
+
+<sub>From version 2.6. Version 2.8 moved the app and widgets to a light sky theme; the watch stays dark.</sub>
 
 <table>
   <tr>
@@ -90,10 +99,14 @@ flowchart LR
     K[cron-job.org] -- /health --> S
 ```
 
+**State colours are the same everywhere** (app, widgets, tiles, watch): blue = locked / closed / running / done, red = unlocked / open / failed, grey = off. A command on its way is neutral, and *sent, waiting for the car* is amber, so neither reads as a state.
+
 The server keeps **one warm BYD session** for its whole life. Login, vehicle lookup, PIN check and capability fetch happen once at boot, never on a button press. On top of that session:
 
 - **Commands are sent once.** pybyd would resend a slow or refused command up to three times, which could sound the horn twice. Here every command goes out once and is checked every 0.8 s.
-- **Commands run one at a time.** A duplicate tap joins the command already in flight. A command that would wait more than 10 s behind another answers *busy* instead of reaching the car late.
+- **Commands queue and run one at a time,** in the order they were tapped, from any entry point (app, widget, tile, watch). A double tap is one command, and a dropped connection never makes the server resend, so the tailgate can't close itself again and the horn never sounds twice.
+- **Honest outcomes:** *done*, *sent, waiting for the car*, *not sent* or *the car refused*. When the answer is unclear the app checks with the car and updates on its own.
+- **A sleeping server is woken first** (*Waking the server…*) and only then is the command sent.
 - **Confirmed effects are held for 60 s**, so a slow car report can't flip a button back.
 - **Status comes from a 60 s cache**, keyed to when the car itself last reported, not to when a command changed the cache. An empty report from a sleeping car is ignored.
 - **The A/C shows as off once its run time is over**, with no extra car read.
@@ -110,10 +123,14 @@ android/          Android app (Kotlin, Jetpack Compose, Material 3)
     widget/       1x1 + dashboard widgets
     tile/         quick-settings tiles
     work/         command service (widgets/tiles) and job fallback
-    system/       charging alerts, language, haptics
+    system/       charging alerts, language, haptics, watch sync
+    bus/          one command bus shared by the app, widgets, tiles and watch
+  wear/           Wear OS app (Compose for Wear OS), synced through the phone
 server/
-  main.py         the whole server (aiohttp + pybyd)
-  tests/          fake car and end-to-end tests (no real network)
+  main.py         entry point
+  bydbridge/      the server (aiohttp + pybyd): routes, auth, command pipeline, session, state, data usage
+  API.md          the full HTTP contract (server 3.0)
+  tests/          fake car, end-to-end and failure-mode tests (no real network)
 docs/
   screenshots/
   design/car-side-view.html   interactive prototype of the car picture
@@ -133,6 +150,7 @@ You need a BYD app account with remote control enabled, and its 6-digit control 
 | `BYD_CONTROL_PIN` | 6-digit remote-control PIN |
 | `AUTH_SECRET` | Any long random string. The app sends it with every request; without it the server refuses everything. |
 | `CAR_TIMEZONE` | Optional. IANA zone for charging schedules, default `Asia/Jerusalem`. |
+| `BYD_MQTT` | Optional. Live push from the car, on by default; `0` turns it off. |
 | `PORT` | Optional. Default `10000`. |
 
 **Run locally**
@@ -172,7 +190,7 @@ The release build is signed with the local debug key so it installs directly. Fo
 
 ## API
 
-All routes take `Authorization: Bearer <AUTH_SECRET>`, or `?secret=` in a browser. Every response includes the car's current state.
+All routes take `Authorization: Bearer <AUTH_SECRET>`, or `?secret=` in a browser. Every response includes the car's current state. The complete contract (request ids, revisions, job states, errors) is in [`server/API.md`](server/API.md); the main routes:
 
 | Route | Does |
 |---|---|
@@ -195,7 +213,8 @@ All routes take `Authorization: Bearer <AUTH_SECRET>`, or `?secret=` in a browse
 
 ```bash
 cd server/tests
-python test_server.py      # 64 end-to-end checks
+python test_server.py      # 79 end-to-end checks
+python test_reliability.py # 96 failure-mode checks: dropped replies, double taps, queued commands, a waking server
 python run_dummy.py        # local server on :8765 for the emulator
 ```
 

@@ -2,12 +2,12 @@
 <!-- Battery bar used by the dashboard widget's horizontal ProgressBar. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@android:id/background">
-        <shape><solid android:color="#FF2D3846"/><corners android:radius="4dp"/></shape>
+        <shape><solid android:color="#FFD9E2EC"/><corners android:radius="4dp"/></shape>
     </item>
     <item android:id="@android:id/progress">
         <clip>
             <shape>
-                <gradient android:angle="0" android:startColor="#FF5CC8FF" android:endColor="#FF2FD39A"/>
+                <gradient android:angle="0" android:startColor="#FF1E78D8" android:endColor="#FF1E78D8"/>
                 <corners android:radius="4dp"/>
             </shape>
         </clip>

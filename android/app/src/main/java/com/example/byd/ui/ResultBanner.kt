@@ -1,6 +1,5 @@
 package com.example.byd.ui
 
-import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -42,7 +41,9 @@ import androidx.compose.ui.unit.dp
 import com.example.byd.R
 import com.example.byd.data.CarCommand
 import com.example.byd.data.CarSnapshot
-import com.example.byd.data.CommandResult
+import com.example.byd.bus.CommandRecord
+import com.example.byd.bus.Outcomes
+import com.example.byd.bus.Tone
 import com.example.byd.ui.theme.Palette
 import kotlinx.coroutines.delay
 
@@ -53,15 +54,15 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun ResultBanner(
-    result: CommandResult?,
+    result: CommandRecord?,
     car: CarSnapshot,
     onRetry: (CarCommand, Map<String, String>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var visible by remember { mutableStateOf(false) }
-    var shown by remember { mutableStateOf<CommandResult?>(null) }
+    var shown by remember { mutableStateOf<CommandRecord?>(null) }
     LaunchedEffect(result?.id) {
-        val fresh = result?.takeIf { SystemClock.elapsedRealtime() - it.finishedAt < 3_000 } ?: return@LaunchedEffect
+        val fresh = result?.takeIf { System.currentTimeMillis() - (it.finishedAt ?: 0L) < 3_000 } ?: return@LaunchedEffect
         shown = fresh
         visible = true
         delay(if (fresh.ok) 2_800 else 6_000)
@@ -75,8 +76,9 @@ fun ResultBanner(
         modifier = modifier,
     ) {
         val r = shown ?: return@AnimatedVisibility
-        val soft = r.error?.soft == true
-        val color = if (r.ok) Palette.Ok else if (soft) Palette.Warn else Palette.Err
+        val display = Outcomes.of(r) // the same answer the widgets, tiles and watch show
+        val soft = display.tone == Tone.WARN
+        val color = toneColor(display.tone)
         val shape = RoundedCornerShape(18.dp)
         Row(
             Modifier
@@ -100,13 +102,14 @@ fun ResultBanner(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (r.ok) stringResource(doneText(r.command, car)) else stringResource(r.error!!.message),
+                    if (r.ok) stringResource(doneText(r.command, car)) else stringResource(display.message),
                     style = MaterialTheme.typography.titleSmall,
                     color = Palette.TextPrimary,
                     maxLines = 2,
                 )
                 Text(
                     when {
+                        r.ok && r.late -> stringResource(R.string.confirmed_late)
                         r.ok -> stringResource(R.string.confirmed)
                         soft -> stringResource(r.command.label)
                         else -> stringResource(R.string.not_done, stringResource(r.command.label))
@@ -116,8 +119,8 @@ fun ResultBanner(
                     maxLines = 1,
                 )
             }
-            // No Retry after a soft outcome: the car may already have done it.
-            if (!r.ok && !soft) {
+            // Retry only where sending again can't do something twice (see Outcomes).
+            if (display.retry) {
                 TextButton(onClick = {
                     visible = false
                     onRetry(r.command, r.params)

@@ -1,3 +1,24 @@
-aiohttp>=3.9,<4
+# Pinned: Render (Python 3.12) installs exactly what was tested locally (Python 3.14).
+# Every version below supports Python 3.12 and 3.14 (their Requires-Python allows both).
+aiohttp==3.14.5
 pybyd==0.0.79
-tzdata>=2024.1
+tzdata==2026.6
+
+# what those pull in, pinned too so a new release can't change the server overnight
+aiohappyeyeballs==2.7.1
+aiosignal==1.4.0
+annotated-types==0.8.0
+attrs==26.1.0
+cffi==2.1.1
+cryptography==50.0.2
+frozenlist==1.8.0
+idna==3.20
+multidict==7.2.1
+paho-mqtt==2.1.0
+propcache==0.5.4
+pycparser==3.12
+pydantic==2.14.2
+pydantic_core==2.50.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+yarl==1.25.1

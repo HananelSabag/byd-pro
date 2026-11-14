@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Widget surface (widget_bg_ok). -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient android:angle="270" android:startColor="#FF14301F" android:endColor="#FF101A16"/>
+    <gradient android:angle="270" android:startColor="#FFE3EFFC" android:endColor="#FFEAF3FD"/>
     <corners android:radius="@dimen/widget_radius"/>
-    <stroke android:width="1dp" android:color="#992FD39A"/>
+    <stroke android:width="1dp" android:color="#991E78D8"/>
 </shape>

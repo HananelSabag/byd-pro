@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lock">נעילה</string>
+    <string name="unlock">פתיחה</string>
+    <string name="cool">קירור</string>
+    <string name="heat">חימום</string>
+    <string name="stop_climate">כיבוי מזגן</string>
+    <string name="locked">נעול</string>
+    <string name="unlocked">פתוח</string>
+    <string name="cooling_left">מקרר · %1$d דק׳</string>
+    <string name="heating_left">מחמם · %1$d דק׳</string>
+    <string name="climate_on">מזגן פועל</string>
+    <string name="charging_kw">טוען · %1$.1f קו״ט</string>
+    <string name="charging">טוען</string>
+    <string name="updated">עודכן %1$s</string>
+    <string name="no_phone">הטלפון לא מחובר</string>
+    <string name="no_data">פתחו את BYD Pro בטלפון פעם אחת</string>
+    <string name="sending">שולח…</string>
+    <string name="done">בוצע</string>
+    <string name="failed">לא בוצע</string>
+    <string name="not_confirmed">עוד לא אושר</string>
+    <string name="no_answer">אין תשובה מהטלפון</string>
+    <string name="tile_description">נעילה, פתיחה, תא מטען ומזגן</string>
+    <string name="open_app">לאפליקציה</string>
+    <string name="percent_range">%1$d%% · %2$d ק״מ</string>
+    <string name="percent">%1$d%%</string>
+    <string name="tailgate">תא מטען</string>
+    <string name="tailgate_open">תא המטען פתוח</string>
+    <string name="sending_to_phone">שולח לטלפון…</string>
+    <string name="phone_no_reply">אין תשובה מהטלפון. האם BYD Pro בטלפון מעודכן?</string>
+    <string name="refused">הטלפון סירב לפקודה</string>
+</resources>

@@ -3,6 +3,9 @@ package com.example.byd.data
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
+/** Today's count from the server: car reads (each wakes the car), commands, and KB exchanged with BYD. */
+data class Usage(val carReads: Int, val commands: Int, val kb: Double)
+
 data class Tires(val fl: Double?, val fr: Double?, val rl: Double?, val rr: Double?, val unit: String)
 
 /** Each door's open state; null = the car didn't report it. */
@@ -49,8 +52,12 @@ data class CarSnapshot(
     /** The A/C as last reported. Prefer [climateOn], which also knows when a run has ended. */
     val climateReported: Boolean? = null,
     val climateUntil: Long? = null, // epoch millis when the A/C started from this app runs out
+    val climateSetC: Int? = null, // the A/C's set temperature, as the car reports it
+    val recirc: Boolean? = null, // A/C air source: recirculating (true) or outside air
+    val chargeKw: Double? = null, // charging power; 0 when not charging
     val efficiency: Double? = null,
     val tires: Tires? = null,
+    val usage: Usage? = null, // what the server asked of the car today (server 3.0+)
     val updatedAt: Long = 0L, // epoch millis of the server's newest data
     val caps: Caps = Caps(),
 ) {
@@ -60,7 +67,18 @@ data class CarSnapshot(
     val climateOn: Boolean?
         get() = if (climateReported == true && climateUntil != null && System.currentTimeMillis() > climateUntil) false else climateReported
 
+    /** Charging power worth showing ("10.4 kW"), only while charging. */
+    val chargingKw: Double?
+        get() = chargeKw?.takeIf { charging == true && it > 0.0 }
+
     companion object {
+        /**
+         * A/C fields the server always sends when it knows them. When it leaves one out it doesn't
+         * know it (e.g. right after a restart), so the old value goes too: a stale "A/C on" must not
+         * stay on screen.
+         */
+        private val MIRRORED = listOf("climate_on", "climate_until", "climate_set_c", "recirc", "charge_kw")
+
         /** Reads the state document stored by [AppPrefs] (same shape as a server response). */
         fun from(doc: JSONObject): CarSnapshot {
             val car = doc.optJSONObject("car") ?: JSONObject()
@@ -93,11 +111,15 @@ data class CarSnapshot(
                 chargeEtaMin = car.int("charge_eta_min"),
                 climateReported = car.bool("climate_on"),
                 climateUntil = car.int("climate_until")?.let { it * 1000L },
+                climateSetC = car.int("climate_set_c"),
+                recirc = car.bool("recirc"),
+                chargeKw = car.double("charge_kw"),
                 efficiency = car.double("efficiency_kwh100"),
                 tires = tires?.let {
                     Tires(it.double("fl"), it.double("fr"), it.double("rl"), it.double("rr"), it.optString("unit", "bar"))
                 },
                 updatedAt = (doc.optLong("updated", 0L)) * 1000L,
+                usage = doc.optJSONObject("usage")?.let { Usage(it.optInt("car_reads"), it.optInt("commands"), it.optDouble("kb", 0.0)) },
                 caps = Caps(
                     trunk = caps.bool("open_trunk"),
                     locate = caps.bool("find_car"),
@@ -111,16 +133,20 @@ data class CarSnapshot(
             )
         }
 
-        /** Folds a server response into the stored document. Fields the server left out keep their last value. */
-        fun merge(stored: JSONObject, response: JSONObject): JSONObject {
+        /**
+         * Folds a server response into the stored document. Fields the server left out keep their
+         * last value. [mirror]: a status read, where a missing A/C field means "unknown". A command's
+         * reply right after a server restart carries only that command's effect, so it never wipes.
+         */
+        fun merge(stored: JSONObject, response: JSONObject, mirror: Boolean = true): JSONObject {
             val merged = JSONObject(stored.toString())
             val car = merged.optJSONObject("car") ?: JSONObject().also { merged.put("car", it) }
             response.optJSONObject("car")?.let { incoming ->
                 incoming.keys().forEach { key -> car.put(key, incoming.get(key)) }
-                // An A/C report without a run end (started elsewhere, or ended) drops the old one.
-                if (incoming.has("climate_on") && !incoming.has("climate_until")) car.remove("climate_until")
+                if (mirror) MIRRORED.forEach { key -> if (!incoming.has(key)) car.remove(key) }
             }
             response.optJSONObject("caps")?.let { merged.put("caps", it) }
+            response.optJSONObject("usage")?.let { merged.put("usage", it) }
             response.optString("name").takeIf { it.isNotBlank() }?.let { merged.put("name", it) }
             if (response.has("updated") && !response.isNull("updated")) merged.put("updated", response.getLong("updated"))
             return merged

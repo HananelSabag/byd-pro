@@ -80,7 +80,7 @@
             <ImageView android:id="@+id/d_car"
                 android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1.15"
                 android:adjustViewBounds="true" android:importantForAccessibility="no"
-                android:scaleType="fitCenter" android:src="@drawable/car_widget"/>
+                android:scaleType="fitCenter" android:src="@drawable/car_widget_side"/>
         </LinearLayout>
 
         <LinearLayout

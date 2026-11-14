@@ -18,7 +18,9 @@ def check(name, cond, extra=""):
 
 
 async def run():
-    main.PAUSE_CHECK_S = 0.05
+    main.config.PAUSE_CHECK_S = 0.05
+    main.config.COMMAND_TIMEOUT_S = 4  # the "car never confirms" case waits this long, not 30 s
+    main.config.VERIFY_DELAYS_S = (0.2,)  # the follow-up look after an unconfirmed command settles at once
     async with TestClient(TestServer(main.create_app())) as c:
         await asyncio.sleep(0.3)  # boot warm-up
         check("warm-up logs in once at boot, without waking the car",
@@ -141,15 +143,15 @@ async def run():
         r = await c.get("/ac?temp=22&mins=10", headers=H); j = await r.json()
         check("A/C run end sent to the app", j["ok"] and j["car"].get("climate_until", 0) > time.time() + 500, j["car"].get("climate_until"))
         main.link.climate_until = time.time() - 1
-        main.link.read_at = time.time() - 30
+        main.link.read_at = time.time() - main.STATUS_CACHE_S / 2
         r = await c.get("/status", headers=H); j = await r.json()
         check("A/C reported off after its run time", j["car"]["climate_on"] is False, j["car"].get("climate_on"))
 
         # "updated" is when the car itself last reported, not when a command changed the cache.
         stamp = main.link.read_at
-        push, main.link.client.on_vehicle_info = main.link.client.on_vehicle_info, None  # no MQTT push this time
+        fakecar.CLOUD.push = False  # no MQTT push this time
         await c.get("/lock", headers=H)
-        main.link.client.on_vehicle_info = push
+        fakecar.CLOUD.push = True
         r = await c.get("/status", headers=H); j = await r.json()
         check("command doesn't make old data look fresh", j["updated"] == int(stamp), (j["updated"], int(stamp)))
 
@@ -159,17 +161,12 @@ async def run():
         check("asleep car: last known state kept", j["ok"] and j["car"]["soc"] == 78 and j["car"]["range_km"] == 331, j["car"].get("soc"))
         fakecar.CAR.asleep = False
 
-        # Commands go to the car once: pybyd's own 3x resend is switched off.
-        seen = {}
-
-        async def probe(*_a, **kw):
-            seen.update(kw)
-
-        original, main._byd_poll_remote_control = main._byd_poll_remote_control, probe
-        await main._byd_control.poll_remote_control(command_retries=3, poll_interval=1.5, poll_attempts=10)
-        main._byd_poll_remote_control = original
+        # Commands go to the car once (the server's own loop; pybyd's 3x resend is never used).
+        before = fakecar.CLOUD.offers["lock"]
+        await c.get("/lock", headers=H)
         check("commands are sent once and checked every 0.8 s",
-              seen == {"command_retries": 1, "poll_interval": 0.8, "poll_attempts": 30}, seen)
+              fakecar.CLOUD.offers["lock"] == before + 1 and main.config.POLL_INTERVAL_S == 0.8,
+              (fakecar.CLOUD.offers["lock"] - before, main.config.POLL_INTERVAL_S))
         before = len([x for x in fakecar.CALLS if x == "seat"])
         r = await c.get("/seat?driver=2&passenger=1", headers=H); j = await r.json()
         sent = len([x for x in fakecar.CALLS if x == "seat"]) - before
@@ -182,6 +179,57 @@ async def run():
         r = await c.get("/charge-schedule?enabled=true", headers=H); check("schedule without a mode is refused", r.status == 400)
         r = await c.get("/info", headers=H); j = await r.json()
         check("/info diagnostics", j["session"]["connected"] and "push_channel" in j and j["recent_commands"], j["push_channel"])
+
+        # --- 2.7: the car's own A/C report wins; air source; charging power
+        def end_climate_hold():
+            for key in main.CLIMATE_KEYS:
+                main.link._held.pop(key, None)
+
+        await c.get("/ac-off", headers=H)
+        await c.get("/seat?seat=driver&level=0", headers=H)
+        r = await c.get("/seat?seat=driver&level=1", headers=H); j = await r.json()
+        check("seat heat doesn't mark the A/C as on", j["ok"] and j["car"]["climate_on"] is False, j["car"].get("climate_on"))
+        fakecar.CAR.hvac_ghost = True
+        end_climate_hold()
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("A/C 'on' with the fan at 0 counts as off", j["car"]["climate_on"] is False, j["car"].get("climate_on"))
+        check("raw A/C fields kept for diagnosis", "wind_position=0" in main.link.last_hvac, main.link.last_hvac)
+        fakecar.CAR.hvac_ghost = False
+        r = await c.get("/ac?temp=22&mins=10", headers=H); j = await r.json()
+        check("A/C start reports on + the air source", j["car"]["climate_on"] is True and j["car"]["recirc"] is True, j["car"].get("recirc"))
+        fakecar.CAR.climate = False  # switched off in the car or from the BYD app
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("right after a start the A/C is held on briefly", j["car"]["climate_on"] is True)
+        end_climate_hold()
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("A/C switched off elsewhere shows off after the short hold", j["car"]["climate_on"] is False, j["car"].get("climate_on"))
+        check("A/C hold is a spin-up window, shorter than the lock hold cap", 0 < main.CLIMATE_HOLD_S < main.COMMAND_HOLD_S)
+
+        r = await c.get("/recirc?on=0", headers=H); j = await r.json()
+        check("air source can't change while the A/C is off", r.status == 409 and j["error"] == "climate_off", j.get("error"))
+        await c.get("/ac?temp=20&mins=20", headers=H)
+        r = await c.get("/recirc?on=0", headers=H); j = await r.json()
+        air = [x for x in fakecar.CALLS if x.startswith("climate_params")][-1]
+        check("outside air while running: restarts with the same temp and the time left",
+              j["ok"] and j["car"]["recirc"] is False and "'cycleMode': 1" in air and "'timeSpan': 3" in air
+              and "'mainSettingTemp': 6" in air, air)
+        end_climate_hold()
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("air source read back from the car", j["car"]["recirc"] is False and j["car"]["climate_on"] is True, j["car"].get("recirc"))
+        check("set temperature read back from the car", j["car"].get("climate_set_c") == 20, j["car"].get("climate_set_c"))
+
+        fakecar.CAR.charging = 1
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("charging power in kW", j["car"].get("charge_kw") == 7.4, j["car"].get("charge_kw"))
+        fakecar.CAR.charging = 0
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("charging power cleared when the charge ends", j["car"].get("charge_kw") == 0, j["car"].get("charge_kw"))
+        check("kW from W or already kW", main._charge_kw(-10400) == 10.4 and main._charge_kw(11) == 11 and main._charge_kw(None) == 0)
+
+        fakecar.CAR.hvac_fails = True
+        r = await c.get("/status?fresh=1", headers=H); j = await r.json()
+        check("a failing A/C read doesn't break status", j["ok"] and j["car"]["soc"] == 78)
+        fakecar.CAR.hvac_fails = False
 
     print(f"\n{sum(ok for _, ok in results)}/{len(results)} passed")
     return all(ok for _, ok in results)

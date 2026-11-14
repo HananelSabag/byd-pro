@@ -54,6 +54,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,9 +74,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.byd.BuildConfig
 import com.example.byd.R
+import com.example.byd.data.Usage
+import androidx.compose.runtime.collectAsState
+import com.example.byd.work.CheckWorker
 import com.example.byd.data.CarRepository
 import com.example.byd.system.AppLanguage
 import com.example.byd.system.ChargeWatch
+import com.example.byd.system.DebugLog
 import com.example.byd.ui.theme.Numeric
 import com.example.byd.ui.theme.Palette
 import com.example.byd.widget.DashboardWidget
@@ -100,6 +105,8 @@ fun SettingsSheet(repo: CarRepository, onDismiss: () -> Unit) {
     var language by remember { mutableStateOf(AppLanguage.get(context)) }
     var haptics by remember { mutableStateOf(prefs.haptics) }
     var chargeAlerts by remember { mutableStateOf(prefs.chargeAlerts) }
+    var autoCheck by remember { mutableStateOf(prefs.autoCheck) }
+    var climateMinutes by remember { mutableIntStateOf(prefs.climateMinutes) }
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Result<Long>?>(null) }
 
@@ -177,6 +184,11 @@ fun SettingsSheet(repo: CarRepository, onDismiss: () -> Unit) {
                 Divider()
                 ToggleRow(R.string.charge_alerts, R.string.charge_alerts_hint, chargeAlerts) { chargeAlerts = it }
                 Divider()
+                ToggleRow(R.string.auto_check, R.string.auto_check_hint, autoCheck) { autoCheck = it }
+                repo.state.collectAsState().value.snapshot.usage?.let { DataUsageRow(it) }
+                Divider()
+                RunTimeRow(climateMinutes) { climateMinutes = it }
+                Divider()
                 WidgetsRow()
             }
 
@@ -187,7 +199,10 @@ fun SettingsSheet(repo: CarRepository, onDismiss: () -> Unit) {
                     prefs.secret = secret
                     prefs.haptics = haptics
                     prefs.chargeAlerts = chargeAlerts
+                    prefs.climateMinutes = climateMinutes
                     if (!chargeAlerts) ChargeWatch.cancelAll(context)
+                    prefs.autoCheck = autoCheck
+                    if (autoCheck) CheckWorker.schedule(context) else CheckWorker.cancel(context)
                     onDismiss()
                     repo.refreshAsync()
                     context.findActivity()?.let { AppLanguage.set(it, language) } // re-opens the screen if it changed
@@ -239,6 +254,19 @@ private fun Section(@StringRes title: Int, content: @Composable ColumnScope.() -
     )
 }
 
+/** Today's car data, as counted by the server: every car read, command and byte (see server usage.py). */
+@Composable
+private fun DataUsageRow(usage: Usage) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        Text(stringResource(R.string.data_today), style = MaterialTheme.typography.bodyLarge, color = Palette.TextPrimary)
+        Text(
+            stringResource(R.string.data_today_value, usage.carReads, usage.commands, String.format(java.util.Locale.ROOT, "%.0f", usage.kb)),
+            style = MaterialTheme.typography.bodySmall,
+            color = Palette.TextMuted,
+        )
+    }
+}
+
 @Composable
 private fun Divider() = HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Palette.Outline.copy(alpha = 0.6f))
 
@@ -250,8 +278,21 @@ private fun LanguageRow(selected: String, onPick: (String) -> Unit) {
         AppLanguage.HEBREW to "עברית",
         AppLanguage.ENGLISH to "English",
     )
+    Segments(stringResource(R.string.language), null, options, selected, onPick)
+}
+
+/** How long every A/C start runs: quick cool / heat, the widgets and the watch. */
+@Composable
+private fun RunTimeRow(selected: Int, onPick: (Int) -> Unit) {
+    val options = listOf(10, 15, 20, 25, 30).map { it to stringResource(R.string.minutes_short, it) }
+    Segments(stringResource(R.string.climate_run_time), stringResource(R.string.climate_run_time_hint), options, selected, onPick)
+}
+
+@Composable
+private fun <T> Segments(title: String, hint: String?, options: List<Pair<T, String>>, selected: T, onPick: (T) -> Unit) {
     Column(Modifier.padding(vertical = 8.dp)) {
-        Text(stringResource(R.string.language), style = MaterialTheme.typography.bodyLarge, color = Palette.TextPrimary)
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = Palette.TextPrimary)
+        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = Palette.TextMuted)
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier
@@ -379,6 +420,22 @@ private fun Diagnostics(repo: CarRepository, url: String, secret: String) {
             }
         }) { Text(stringResource(R.string.copy_logs), color = Palette.Accent) }
     }
+    // The phone's (and watch's) own command log: what happened to each tap, step by step.
+    val scope = rememberCoroutineScope()
+    var sharing by remember { mutableStateOf(false) }
+    TextButton(
+        enabled = !sharing,
+        onClick = {
+            sharing = true
+            scope.launch {
+                try {
+                    DebugLog.share(context)
+                } finally {
+                    sharing = false
+                }
+            }
+        },
+    ) { Text(stringResource(R.string.share_debug_log), color = Palette.Accent) }
 }
 
 private fun logsKey(secret: String): String {

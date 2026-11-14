@@ -56,6 +56,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.example.byd.R
+import com.example.byd.bus.Outcomes
+import com.example.byd.bus.Tone
 import com.example.byd.data.AppPrefs
 import com.example.byd.data.CarCommand
 import com.example.byd.data.CarUiState
@@ -89,9 +91,10 @@ fun SeatHeatRow(state: CarUiState, send: SendWith) {
         send(CarCommand.SEAT, mapOf("driver" to "$driver", "passenger" to "$passenger"))
     }
     // The levels above are optimistic: if the car refuses, fall back to what it reports.
-    LaunchedEffect(state.lastResult?.id) {
-        val result = state.lastResult ?: return@LaunchedEffect
-        if (result.command == CarCommand.SEAT && !result.ok && result.error?.soft != true) {
+    val seatResult = state.latest(listOf(CarCommand.SEAT))?.takeIf { it.terminal }
+    LaunchedEffect(seatResult?.id) {
+        val result = seatResult ?: return@LaunchedEffect
+        if (Outcomes.of(result).tone == Tone.ERR) {
             driver = car.seatDriver ?: 0
             passenger = car.seatPassenger ?: 0
         }
@@ -119,7 +122,7 @@ fun SeatHeatRow(state: CarUiState, send: SendWith) {
 private fun RowScope.SeatButton(@StringRes seat: Int, level: Int, busy: Boolean, onClick: () -> Unit) {
     val warmth by animateColorAsState(
         when (level) {
-            2 -> Color(0xFFFF8A4C)
+            2 -> Palette.Heat
             1 -> Palette.Warn
             else -> Palette.TextSecondary
         },
@@ -140,7 +143,7 @@ private fun RowScope.SeatButton(@StringRes seat: Int, level: Int, busy: Boolean,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-            if (busy) CircularProgressIndicator(Modifier.size(28.dp), color = Palette.Accent, strokeWidth = 2.dp)
+            if (busy) CircularProgressIndicator(Modifier.size(28.dp), color = Palette.Busy, strokeWidth = 2.dp)
             Icon(painterResource(R.drawable.ic_seat), null, tint = warmth, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(10.dp))
@@ -172,10 +175,10 @@ fun ChargingSection(state: CarUiState, prefs: AppPrefs, send: SendWith, onWantsA
     val context = LocalContext.current
     // The section title already says "Charging", so the header carries what matters right now.
     val (status, statusColor) = when {
-        car.charging == true -> (
-            car.chargeEtaMin?.let { stringResource(R.string.charge_full_in, durationText(context, it)) }
-                ?: stringResource(R.string.state_charging_now)
-            ) to Palette.Ok
+        car.charging == true -> listOfNotNull(
+            car.chargingKw?.let { stringResource(R.string.charge_kw, it) },
+            car.chargeEtaMin?.let { stringResource(R.string.charge_full_in, durationText(context, it)) },
+        ).joinToString("  ·  ").ifEmpty { stringResource(R.string.state_charging_now) } to Palette.Ok
         car.plugged == true -> stringResource(R.string.state_plugged) to Palette.TextSecondary
         car.plugged == false -> stringResource(R.string.state_unplugged) to Palette.TextMuted
         else -> null to Palette.TextMuted

@@ -13,43 +13,29 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.byd.R
-import com.example.byd.data.CarCommand
 import com.example.byd.data.CarRepository
-import com.example.byd.system.Buzz
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Runs a command started from a widget or tile, outside the app's UI.
- *
- * Expedited work starts right away and gets the network even in Doze, yet the app holds
- * nothing when idle: no service, no wakelock, no polling. The job ends seconds after the
- * car answers.
+ * Background work: a status read (refresh button, charging checks), or keeping the app alive for
+ * the commands on the bus when Android refused the foreground service. A job never sends a
+ * command itself: a command that couldn't go out while the app was alive is reported, not sent
+ * late (the bus marks it "not sent" when the app starts again).
  */
 class CommandWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         val repo = CarRepository.get(applicationContext)
-        if (inputData.getBoolean(KEY_REFRESH, false)) {
-            repo.refresh(fresh = inputData.getBoolean(KEY_FRESH, true))
-            return Result.success()
+        when {
+            inputData.getBoolean(KEY_REFRESH, false) -> repo.refresh(fresh = inputData.getBoolean(KEY_FRESH, true))
+            inputData.getBoolean(KEY_KEEP, false) -> {
+                withTimeoutOrNull(KEEP_MAX_MS) { repo.bus.awaitIdle() }
+                delay(CarRepository.RESULT_SHOW_MS + 500) // widgets show the answer, then their normal state
+            }
+            // A command queued by version 2.7 before the update: too old to send now.
+            inputData.getString(KEY_COMMAND) != null -> repo.log.log(null, "dropped a command job left by 2.7: ${inputData.getString(KEY_COMMAND)}")
         }
-        val command = CarCommand.fromName(inputData.getString(KEY_COMMAND)) ?: return Result.failure()
-        // When Android delays background work (battery saver, quota, a reboot), an Unlock that
-        // runs minutes after the tap could open the car with nobody there. Those are dropped. A
-        // job with no tap time was queued by an older version, so it is old by definition.
-        val tappedAt = inputData.getLong(KEY_TAPPED_AT, 0L)
-        val age = if (tappedAt > 0) System.currentTimeMillis() - tappedAt else Long.MAX_VALUE
-        if ((command in ONLY_IF_PROMPT && age > MAX_DELAY_MS) || age > STALE_MS) {
-            repo.reportTooLate(command)
-            if (repo.prefs.haptics) Buzz.failure(applicationContext)
-            delay(CarRepository.RESULT_SHOW_MS)
-            return Result.success()
-        }
-        val result = repo.send(command)
-        if (repo.prefs.haptics) {
-            if (result.ok) Buzz.success(applicationContext) else Buzz.failure(applicationContext)
-        }
-        delay(CarRepository.RESULT_SHOW_MS) // keep the process alive while widgets show ✓ / ✗
         return Result.success()
     }
 
@@ -68,36 +54,28 @@ class CommandWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     }
 
     companion object {
-        private const val KEY_COMMAND = "command"
+        private const val KEY_COMMAND = "command" // 2.7 jobs
         private const val KEY_REFRESH = "refresh"
         private const val KEY_FRESH = "fresh"
-        private const val KEY_TAPPED_AT = "tapped_at"
-        private const val MAX_DELAY_MS = 45_000L
-        private const val STALE_MS = 10 * 60_000L // even a Lock isn't sent this long after the tap
-        private val ONLY_IF_PROMPT = setOf(
-            CarCommand.UNLOCK, CarCommand.TRUNK, CarCommand.WINDOWS_VENT, CarCommand.CLIMATE_ON,
-            CarCommand.LOCATE, CarCommand.FLASH, // a horn going off minutes later helps nobody
-        )
+        private const val KEY_KEEP = "keep"
+        private const val KEEP_MAX_MS = 4 * 60_000L
         private const val CHANNEL = "commands"
         private const val NOTIFICATION_ID = 7
 
-        fun enqueue(context: Context, command: CarCommand) = enqueue(
-            context, "cmd-${command.name}",
-            workDataOf(KEY_COMMAND to command.name, KEY_TAPPED_AT to System.currentTimeMillis()),
-        )
-
         /** [fresh] wakes the car (refresh button); a scheduled check is happy with recent data. */
         fun enqueueRefresh(context: Context, fresh: Boolean = true) =
-            enqueue(context, "refresh", workDataOf(KEY_REFRESH to true, KEY_FRESH to fresh))
+            enqueue(context, "refresh", workDataOf(KEY_REFRESH to true, KEY_FRESH to fresh), ExistingWorkPolicy.REPLACE)
 
-        // REPLACE is safe: the command itself lives in CarRepository's scope, and a tap on a
-        // command that is still in flight joins it there instead of sending it twice.
-        private fun enqueue(context: Context, name: String, data: androidx.work.Data) {
+        /** KEEP: a keep-alive already running waits for the whole bus, including what was just added. */
+        fun enqueueKeepAlive(context: Context) =
+            enqueue(context, "keep-alive", workDataOf(KEY_KEEP to true), ExistingWorkPolicy.KEEP)
+
+        private fun enqueue(context: Context, name: String, data: androidx.work.Data, policy: ExistingWorkPolicy) {
             val request = OneTimeWorkRequestBuilder<CommandWorker>()
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setInputData(data)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(name, ExistingWorkPolicy.REPLACE, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(name, policy, request)
         }
     }
 }

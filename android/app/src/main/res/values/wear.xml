@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The watch app finds this phone (and sends it commands) by this capability. -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>byd_phone</item>
+    </string-array>
+</resources>

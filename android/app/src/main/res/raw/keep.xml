@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resources read only by name from outside the app, so the release shrinker must keep them.
+     android_wear_capabilities: Google Play services reads it to tell the watch app where the
+     phone is; without it the watch shows "phone not connected" and can't send commands. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@array/android_wear_capabilities" />

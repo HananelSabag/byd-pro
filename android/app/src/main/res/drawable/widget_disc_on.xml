@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Icon disc of a 1x1 widget (widget_disc_on). -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="#2E5CC8FF"/>
-    <stroke android:width="1dp" android:color="#805CC8FF"/>
+    <solid android:color="#2E1E78D8"/>
+    <stroke android:width="1dp" android:color="#801E78D8"/>
 </shape>

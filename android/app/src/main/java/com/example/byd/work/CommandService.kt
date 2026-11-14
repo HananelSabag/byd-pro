@@ -10,85 +10,114 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import com.example.byd.R
+import com.example.byd.bus.CommandRecord
+import com.example.byd.bus.Outcomes
+import com.example.byd.bus.Source
 import com.example.byd.data.CarCommand
 import com.example.byd.data.CarRepository
 import com.example.byd.system.Buzz
 import com.example.byd.widget.QuickAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Runs a command tapped on a widget or tile, right away.
+ * Keeps the app alive while a command is on its way, however it was tapped.
  *
- * Background jobs can be held back for minutes by phone battery savers (OnePlus, Xiaomi,
- * Samsung…), and a late Unlock is worse than none. A short foreground service is allowed right
- * after a widget or tile tap and starts at once, with network even in Doze. It shows a quiet
- * "sending" notification and stops the moment the car has answered.
+ * The command itself runs on the bus (CarRepository); this short foreground service only keeps
+ * the process, its network (even in Doze) and the widgets' answer alive until every command,
+ * its check and the widgets' result display are done, plus [LINGER_MS]. Battery savers can hold
+ * background jobs back for minutes; a foreground service started right after a tap can't be.
+ * It shows a quiet notification with the command's current step and stops by itself.
  */
 class CommandService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var running = 0
+    private var lastStartId = 0
+    private var keeper: Job? = null
+    private var refreshes = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         val repo = CarRepository.get(this)
-        val refresh = intent?.action == ACTION_REFRESH
-        val command = if (refresh) null else CarCommand.fromName(intent?.getStringExtra(EXTRA_COMMAND))
-        goForeground(command)
-        if (!refresh && command == null) {
-            if (running == 0) stop()
-            return START_NOT_STICKY
-        }
-        running++
-        scope.launch {
-            try {
-                if (command == null) {
+        goForeground(notification(textFor(repo.bus.records.value)))
+        if (intent?.action == ACTION_REFRESH) {
+            refreshes++
+            scope.launch {
+                try {
                     repo.refresh(fresh = true)
-                } else {
-                    val result = repo.send(command)
-                    if (repo.prefs.haptics) {
-                        if (result.ok) Buzz.success(this@CommandService) else Buzz.failure(this@CommandService)
-                    }
-                    delay(CarRepository.RESULT_SHOW_MS) // widgets show the answer, then their normal state
+                } finally {
+                    refreshes--
                 }
-            } finally {
-                if (--running == 0) stop()
             }
         }
+        keep(repo)
         return START_NOT_STICKY
     }
 
-    /** Android 14+: a short service gets about three minutes; a command never needs that long. */
-    override fun onTimeout(startId: Int) = stop()
+    /** Waits until the bus is idle (and stays idle for [LINGER_MS]), then stops, unless a newer start came in. */
+    private fun keep(repo: CarRepository) {
+        if (keeper?.isActive == true) return
+        keeper = scope.launch {
+            val texts = launch {
+                repo.bus.records.map(::textFor).distinctUntilChanged().collect { notify(it) }
+            }
+            while (true) {
+                repo.bus.awaitIdle()
+                delay(LINGER_MS) // widgets show the answer, then their normal state is drawn
+                if (!repo.bus.idle.value || refreshes > 0) continue
+                // Only stops if no start arrived after lastStartId: a tap that comes in right now
+                // keeps the service (stopSelf() here could crash such a start, see Android's
+                // "did not then call startForeground").
+                if (stopSelfResult(lastStartId)) break
+            }
+            texts.cancel()
+        }
+    }
 
-    override fun onTimeout(startId: Int, fgsType: Int) = stop()
+    /** Android 14+: a short service gets about three minutes; the bus has persisted everything by then. */
+    override fun onTimeout(startId: Int) = timeUp()
+
+    override fun onTimeout(startId: Int, fgsType: Int) = timeUp()
+
+    private fun timeUp() {
+        CarRepository.get(this).log.log(null, "keep-alive service out of time")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelfResult(lastStartId)
+    }
 
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun stop() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+    private fun textFor(records: List<CommandRecord>): String {
+        val live = records.lastOrNull { !it.terminal } ?: return getString(R.string.notif_sending)
+        return getString(R.string.notif_step, getString(live.command.label), getString(Outcomes.of(live).label))
     }
 
-    private fun goForeground(command: CarCommand?) {
+    private fun notification(text: String): Notification = Notification.Builder(this, CHANNEL)
+        .setSmallIcon(R.drawable.ic_car)
+        .setContentTitle(text)
+        .setOngoing(true)
+        .build()
+
+    private fun notify(text: String) {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+    }
+
+    private fun goForeground(notification: Notification) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.notif_channel), NotificationManager.IMPORTANCE_MIN),
         )
-        val text = command?.let { getString(R.string.notif_sending_cmd, getString(it.label)) } ?: getString(R.string.notif_sending)
-        val notification = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_car)
-            .setContentTitle(text)
-            .setOngoing(true)
-            .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
         } else {
@@ -99,24 +128,30 @@ class CommandService : Service() {
     companion object {
         private const val CHANNEL = "commands"
         private const val NOTIFICATION_ID = 7
-        private const val EXTRA_COMMAND = "command"
-        private const val ACTION_RUN = "com.example.byd.RUN"
+        private const val LINGER_MS = 3_000L
+        private const val ACTION_KEEP = "com.example.byd.KEEP"
         private const val ACTION_REFRESH = "com.example.byd.REFRESH"
 
-        /**
-         * Sends [command] from a widget or tile tap: instant "sending" state and buzz, then the
-         * service. If Android refuses the service (it shouldn't after a tap), the job queue
-         * takes it, with its late-tap guard.
-         */
-        fun run(context: Context, command: CarCommand) {
+        /** A tap outside the app (widget, confirm dialog, quick-settings tile): instant buzz, then the bus. */
+        fun tap(context: Context, command: CarCommand, source: Source): CommandRecord {
             val repo = CarRepository.get(context)
             if (repo.prefs.haptics) Buzz.tap(context)
-            repo.markQueued(command)
-            val started = start(context, Intent(context, CommandService::class.java).setAction(ACTION_RUN).putExtra(EXTRA_COMMAND, command.name))
-            if (!started) CommandWorker.enqueue(context, command)
+            return repo.run(command, source = source)
         }
 
-        fun run(context: Context, action: QuickAction) = run(context, action.command(CarRepository.get(context)))
+        fun tap(context: Context, action: QuickAction, source: Source): CommandRecord =
+            tap(context, action.command(CarRepository.get(context)), source)
+
+        /**
+         * Keeps the process alive for the commands on the bus. If Android refuses the service
+         * (a start from the background without an exemption), a job keeps it alive instead.
+         */
+        fun keepAlive(context: Context) {
+            if (!start(context, Intent(context, CommandService::class.java).setAction(ACTION_KEEP))) {
+                CarRepository.get(context).log.log(null, "foreground service refused: keep-alive job instead")
+                CommandWorker.enqueueKeepAlive(context)
+            }
+        }
 
         /** The dashboard widget's refresh button: one fresh read of the car. */
         fun refresh(context: Context) {
